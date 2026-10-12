@@ -57,7 +57,6 @@ import {
   SettingsRow,
 } from "./primitives";
 import { AgentInstructionsSection, UpdatesRow } from "./agent-sections";
-import { PromptEnhancementCard } from "./prompt-enhancement-card";
 import { CloseBehaviorSection, DeveloperSection } from "./developer-sections";
 import { PluginScenicThemesDestination } from "../../components/settings/PluginScenicThemesDestination";
 import { ConfigSyncPage } from "../../components/settings/ConfigSyncPage";
@@ -184,7 +183,7 @@ export function SettingsPage() {
     const tryFind = (attempt: number) => {
       if (cancelled) return;
       const titles = document.querySelectorAll<HTMLElement>(
-        ".settings-content .settings-row-title, .settings-content .settings-card-heading",
+        ".settings-content .settings-row-title, .settings-content .settings-card-heading, .settings-content .about-update-title",
       );
       const match = [...titles].find(
         (node) => node.textContent?.trim() === target,
@@ -534,10 +533,6 @@ export function SettingsPage() {
                 />
               </SettingsCard>
 
-              <PromptEnhancementCard
-                settings={settings}
-                saveSettings={saveSettings}
-              />
             </div>
           )}
 
@@ -578,17 +573,23 @@ export function SettingsPage() {
 
           {tab === "about" && (
             <div className="settings-stack">
+              <div className="settings-about-hero">
+                <div className="settings-about-hero-name">
+                  {version?.name || "PI-Desktop"}
+                </div>
+                <div className="settings-about-hero-version">
+                  {t("settings.aboutVersion", { version: version?.version ?? "" })}
+                </div>
+                <div className="settings-about-hero-meta">
+                  protocol {version?.protocolVersion} · host {version?.hostVersion}
+                </div>
+              </div>
+              <UpdatesRow
+                currentVersion={version?.version}
+                settings={settings ?? null}
+                saveSettings={saveSettings}
+              />
               <SettingsCard>
-                <SettingsRow title={t("settings.application")}>
-                  <div className="settings-about-meta">
-                    <div className="font-medium">
-                      {version?.name || "PI-Desktop"} {version?.version}
-                    </div>
-                    <div className="font-mono text-xs-plus text-text-muted">
-                      protocol {version?.protocolVersion} · host {version?.hostVersion}
-                    </div>
-                  </div>
-                </SettingsRow>
                 <SettingsRow title={t("settings.logs")}>
                   <Button variant="secondary" onClick={() => void api.openLogs()}>
                     {t("settings.openLogs")}
@@ -605,11 +606,6 @@ export function SettingsPage() {
                     {t("settings.openFeedback")}
                   </Button>
                 </SettingsRow>
-                <UpdatesRow
-                  currentVersion={version?.version}
-                  settings={settings ?? null}
-                  saveSettings={saveSettings}
-                />
               </SettingsCard>
 
               {settings && (

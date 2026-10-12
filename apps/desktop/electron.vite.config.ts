@@ -14,7 +14,7 @@ function tightenCsp(): Plugin {
         .replace(" 'unsafe-eval'", "")
         .replace(
           /connect-src [^;]*;/,
-          "connect-src 'self';",
+          "connect-src 'self' plugin-renderer:;",
         );
     },
   };

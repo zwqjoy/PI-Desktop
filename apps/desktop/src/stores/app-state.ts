@@ -1,4 +1,5 @@
 import type { RecentModel } from "../lib/recent-models";
+import type { RemoteProjectTarget } from "../lib/remote-project-session";
 import type {
   AgentEventEnvelope,
   BrowserState,
@@ -206,7 +207,7 @@ export type AppState = {
     id: string,
     opts?: { record?: boolean } & NavigationOptions,
   ) => Promise<void>;
-  newSession: (options?: { projectPath?: string | null }) => Promise<string | null>;
+  newSession: (options?: { projectPath?: string | null; remoteProject?: RemoteProjectTarget }) => Promise<string | null>;
   forkSession: (id: string) => Promise<void>;
   forkAssistantMessage: (messageId: string) => Promise<void>;
   configureActiveSession: (config: {
@@ -262,6 +263,11 @@ export type AppState = {
   abort: () => Promise<void>;
   openProject: () => Promise<void>;
   closeProjectDialog: () => void;
+  createProjectFromRemote: (input: {
+    name: string;
+    hostKey: string;
+    path: string;
+  }) => Promise<void>;
   createProjectFromFolders: (input: {
     name: string;
     folders: string[];

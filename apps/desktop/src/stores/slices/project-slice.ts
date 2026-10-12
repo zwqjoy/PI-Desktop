@@ -38,7 +38,6 @@ import type { StoreAccess } from "./types";
 
 export type ProjectSliceDependencies = StoreAccess & {
   runtime: SessionRuntime;
-  manualSessionTitles: Set<string>;
   withoutRecordKey: <T>(record: Record<string, T>, key: string) => Record<string, T>;
   withProjectDisplayName: (
     workspace: ProjectWorkspace,
@@ -144,15 +143,13 @@ function clearLocalSessionState(
     get,
     set,
     runtime,
-    manualSessionTitles,
     withoutRecordKey,
   }: Pick<
     ProjectSliceDependencies,
-    "get" | "set" | "runtime" | "manualSessionTitles" | "withoutRecordKey"
+    "get" | "set" | "runtime" | "withoutRecordKey"
   >,
   id: string,
 ): void {
-  manualSessionTitles.delete(id);
   runtime.pendingSessionConfigurations.delete(id);
   runtime.sessionTranscriptCache.delete(id);
   runtime.sessionHistoryCache.delete(id);
@@ -219,7 +216,6 @@ export function createProjectSlice({
   get,
   set,
   runtime,
-  manualSessionTitles,
   withoutRecordKey,
   withProjectDisplayName,
   promoteProjectPath,
@@ -238,6 +234,7 @@ export function createProjectSlice({
   | "openProject"
   | "closeProjectDialog"
   | "createProjectFromFolders"
+  | "createProjectFromRemote"
   | "createProjectFromGit"
   | "clearProject"
   | "deleteProject"
@@ -311,6 +308,7 @@ export function createProjectSlice({
         };
       });
       rememberProject({
+        ...(workspace.remote ? { remote: workspace.remote } : {}),
         path: workspace.path,
         name: workspace.name || workspace.path,
         branch: workspace.branch,
@@ -398,6 +396,19 @@ export function createProjectSlice({
         { get, set, runtime },
         { name, folders, primaryPath },
       ),
+    createProjectFromRemote: async ({ name, hostKey, path }) => {
+      const normalizedName = normalizeProjectName(name);
+      if (!normalizedName) throw new Error(i18n.t("errors.projectNameLength"));
+      const intent = runtime.beginNavigationIntent();
+      const { group } = await api.createRemoteProjectGroup(normalizedName, hostKey, path);
+      if (!runtime.navigationIntentIsCurrent(intent)) return;
+      const workspace = await get().activateProject(group.primaryPath, { navigationIntent: intent });
+      if (!workspace || !runtime.navigationIntentIsCurrent(intent)) return;
+      get().renameProject(group.primaryPath, normalizedName);
+      const onboarding = await api.getOnboarding();
+      if (!runtime.navigationIntentIsCurrent(intent)) return;
+      set({ createProjectDialogOpen: false, onboarding, page: "chat" });
+    },
     createProjectFromGit: async ({ name, url, parentPath }) => {
       // Clone first, then create the project through the same group path, so a
       // checkout and a folder pick produce identical project semantics.
@@ -446,7 +457,7 @@ export function createProjectSlice({
       await api.removeProject(path);
       for (const id of removedSessionIds) {
         clearLocalSessionState(
-          { get, set, runtime, manualSessionTitles, withoutRecordKey },
+          { get, set, runtime, withoutRecordKey },
           id,
         );
       }
@@ -534,14 +545,9 @@ export function createProjectSlice({
       if (!id) return;
       const nextTitle = title.trim();
       if (!nextTitle) throw new Error(i18n.t("errors.sessionTitleEmpty"));
-      manualSessionTitles.add(id);
       const result = await api.renameSession(id, nextTitle);
       if (!result.ok) throw new Error(i18n.t("errors.sessionNotFound"));
       set((state) => ({
-        sessionMeta: {
-          ...state.sessionMeta,
-          [id]: { ...(state.sessionMeta[id] || {}), manualTitle: true },
-        },
         sessions: state.sessions.map((session) =>
           session.id === id ? { ...session, title: nextTitle } : session,
         ),
@@ -577,10 +583,7 @@ export function createProjectSlice({
       await api.deleteSession(id);
       void api.pluginViewClose("pi.browser", "browser", { sessionId: id })
         .catch((error) => get().showToast(String(error), { variant: "error" }));
-      clearLocalSessionState(
-        { get, set, runtime, manualSessionTitles, withoutRecordKey },
-        id,
-      );
+      clearLocalSessionState({ get, set, runtime, withoutRecordKey }, id);
       persistCurrentSidebar(get);
       await get().refreshSessions();
     },

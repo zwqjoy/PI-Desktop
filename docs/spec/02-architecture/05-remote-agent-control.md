@@ -171,10 +171,46 @@ Bootstrap runs over the user's own SSH session, never over RACP:
    device token that the desktop stores in its secure storage.
 5. The Host records the desktop device as `owner` of that Host.
 
-Provider configuration for the remote Host is written over the same SSH
-channel by the bootstrap step, as Host-local configuration. It never crosses
-RACP, so the secret boundary in `05-security/02-remote-control-security.md`
-§7 is unchanged.
+Provider configuration is copied only after explicit selection and consent in
+Settings. Electron Main reads the selected eligible secrets and sends a bounded
+versioned payload over SSH stdin to `pi-host provider-import`. That CLI forwards
+only `providers.import` to the running Host's owner-only Unix socket. The running
+Host uses its existing Rust RPC connection; the CLI never starts another database
+writer. Configuration and credentials never cross RACP or return to the renderer.
+See `docs/adr/remote-provider-import.md` and security §3.5.
+
+**Desktop remote workspaces.** New projects are ordinary locally owned logical
+project groups with an additive `{hostKey, path}` remote workspace binding.
+The shared Create project dialog keeps the user-selected name locally and opens
+a separate directory-selection dialog. Host project catalogs, project
+registration, remote session creation and provider import are not part of this
+flow. The local switcher, sidebar, archive, session creation, model selection,
+project instructions and memory consume the same local project identity.
+
+The local Agent and local provider transport own model execution. API keys,
+OAuth credentials, local provider endpoints and model requests remain on Desktop.
+After local permissions and tool-admission checks, host-core emits a remote
+workspace-tool request. Main dispatches only supported workspace tools to the
+paired Host's additive `workspace/toolExecute` endpoint, and relays cancellation
+through `workspace/toolAbort`. The remote canonical workspace/browse boundary
+is independently enforced. No failed remote call falls back to the local runner,
+and no mutation is automatically retried. The opaque local project identity is
+never resolved as a directory on either machine.
+
+Existing remote Agent histories remain reachable through their previous backend.
+Their session capabilities and opaque history cursors remain enforced; this does
+not grant them local project paths or change their persisted ownership.
+`remoteHostBrowseProjects` forwards only validated Host/path input to
+`project/browse` and validates returned directory entries. See
+[Local Agent remote workspace tools](../../adr/local-agent-remote-workspace-tools.md).
+The broader R2 target below is not an acceptance claim for every transport feature.
+
+Reconnect rebuilds SSH forwarding and RACP subscriptions, acknowledges durable
+cursors, deduplicates events, and recovers snapshots on epoch/gap changes. It never
+replays mutations. Subscriptions are bounded and catalog refreshes do not subscribe
+every listed session. The additive Desktop-only `remoteInteractions` IPC event
+reconciles pending cards from accepted snapshots and peer resolutions; it does not
+add a network operation or change the local AgentEvent contract.
 
 The Host binds loopback only. Plain `ws://` is accepted on that port only
 when both the bind address and the peer address are loopback and a valid

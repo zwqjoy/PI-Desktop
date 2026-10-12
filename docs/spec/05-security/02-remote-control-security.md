@@ -156,8 +156,8 @@ pairing only binds a desktop device to the Host it started.
   outbound access to GitHub cannot be bootstrapped in the first version.
 - Revoking the device token on the Host, or removing the Host from the
   desktop, ends the pairing; a new pairing needs a new SSH bootstrap.
-- Provider configuration for the remote Host is written over the SSH channel
-  by the bootstrap step as Host-local configuration; it never crosses RACP.
+- Provider configuration is copied only after explicit selection and consent,
+  over SSH stdin as Host-local configuration; it never crosses RACP.
 
 **SSH credential handling (ADR 0293).** The desktop MAY hold the SSH login
 password for a host the user paired that way, under these rules:
@@ -180,6 +180,47 @@ password for a host the user paired that way, under these rules:
   `NumberOfPasswordPrompts=1`. Default identities are not tried, because an
   encrypted local key would consume the single askpass answer as a passphrase.
   A user with both a key and a password picks key mode.
+
+### 3.5 Explicit provider import for the experimental MVP
+
+- Only SSH-managed hosts offer copy. The renderer sends provider IDs and an
+  explicit default-model choice, never credentials. Selection and consent start
+  empty; changing selection invalidates consent.
+- Main and Host validate the versioned payload, at most 32 providers and 1 MiB.
+  OAuth, plugin-owned, CLI/local providers, local-only endpoint URLs, and reserved
+  credential headers are excluded. Only selected eligible secrets are read.
+- `pi-host provider-import` reads stdin and connects to the running Host's private
+  `pi-host/admin.sock` (0600 inside owner-only 0700 directories). It never opens
+  SQLite or starts a second host-core. An ownership lock also guards stale-socket
+  recovery; connections, response sizes, import concurrency, and deadlines are bounded.
+- The socket exposes one operation, not arbitrary host-core RPC. Import failures
+  return sanitized codes; payloads, credentials and remote stderr are not logged or
+  echoed. Model/header overrides, including zero values, retain their meaning.
+- Import is additive: identical copies reuse the created ID, changed input creates
+  a new row, and remotely modified/deleted rows are not overwritten. A private
+  bounded receipt journal stores digests, not raw settings or keys. Uncertain
+  creation returns `import_incomplete` on retry instead of risking a duplicate.
+- Provider state remains owned by Rust host-core and uses existing provider and
+  secret storage. No database schema or RACP credential surface is added.
+
+### 3.6 Local-Agent remote workspace tools
+
+For locally owned remote projects, all provider configuration and model requests
+remain on Desktop. Provider import is a legacy remote-Agent operation and is not
+used by this project workflow. The owner-only workspace tool service accepts no
+provider or credential fields and has no provider, project or session mutation
+endpoint. Local host-core first applies its existing permissions and admission;
+Main then sends the admitted tool request to the selected paired Host. The Host
+canonicalizes the root and reuses its pure tool runner with external paths denied.
+A disconnected or unsupported Host cannot redirect execution onto Desktop.
+
+Device/session namespace isolation prevents cross-device cancellation and tool
+identity collisions. Connection disposal aborts active calls; invalid or late
+responses remain errors. There is no automatic mutation retry or reconnect replay.
+Remote paths never reach local attachment hydration, local instruction filesystem
+resolution or mutation realpath probes. Trusted extensions still register local
+model providers. Their implicit workspace `pi.exec` is rejected for a remote root;
+local provider helpers must explicitly supply a local working directory.
 
 ## 4. Authorization model
 
@@ -229,8 +270,10 @@ The following client fields are advisory only or forbidden:
 - a client cannot claim another `principal`, `agentName`, `connectionId`, or
   `clientConnectionId`.
 
-The Host chooses the effective model/provider configuration from its own
-session and provider state. Remote control does not become a credential relay.
+For legacy remote-Agent sessions, the Host chooses the effective model/provider
+configuration from its own session and provider state. Locally owned remote
+projects instead execute their model transport on Desktop (§3.6). Neither path
+turns RACP into a credential relay.
 
 ### 4.3 Remote permission ceiling
 
@@ -297,7 +340,8 @@ connection fail before they reach the Agent runtime.
 
 ## 6. Workspace, file, and attachment security
 
-1. A remote request identifies a Session, not an arbitrary filesystem root.
+1. Legacy remote-Agent requests identify a Session. The owner-only local-Agent
+   workspace service identifies an owner-selected root and revalidates it (§3.6).
 2. The Host resolves every tool path against that Session's durable project or
    scratch root.
 3. Remote clients send attachment bytes or opaque attachment ids, never local

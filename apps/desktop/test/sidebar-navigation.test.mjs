@@ -185,10 +185,12 @@ test("sidebar floating menus open to the anchor's right", () => {
 
   assert.match(triggerPlacement, /left:\s*Math\.max\(/);
   assert.match(triggerPlacement, /rect\.right \+ 4/);
+  assert.match(triggerPlacement, /top:\s*clampSidebarFloatingMenuTop\(rect\.bottom \+ 4, window\.innerHeight\)/);
   assert.doesNotMatch(triggerPlacement, /window\.innerWidth/);
   assert.doesNotMatch(triggerPlacement, /right:\s*Math\.max/);
   assert.match(pointPlacement, /left:\s*Math\.max\(/);
   assert.match(pointPlacement, /x \+ 4/);
+  assert.match(pointPlacement, /top:\s*clampSidebarFloatingMenuTop\(y \+ 4, window\.innerHeight\)/);
   assert.doesNotMatch(pointPlacement, /window\.innerWidth/);
   assert.match(sidebarSource, /placeMenuAtPoint\(event\.clientX, event\.clientY\)/);
   assert.match(sidebarSource, /left: menuPosition\.left/);
@@ -204,6 +206,8 @@ test("portaled sort menu does not stretch to the viewport edge", () => {
 
   assert.match(basePopoverRule, /position:\s*fixed;/);
   assert.doesNotMatch(basePopoverRule, /position:\s*absolute;/);
+  assert.match(basePopoverRule, /max-height:\s*min\(360px,\s*calc\(100vh - 16px\)\);/);
+  assert.match(basePopoverRule, /overflow-y:\s*auto;/);
   assert.match(floatingPopoverRule, /top:\s*auto;/);
   assert.match(floatingPopoverRule, /right:\s*auto;/);
   assert.match(globalStyles, /\.sidebar-floating-menu\s*\{[^}]*width:\s*max-content;/s);
@@ -248,12 +252,14 @@ test("project rows expose folder actions and full-path hover", () => {
   assert.doesNotMatch(sidebarSource, /api\.openSessionFolder\(/);
   assert.match(
     sidebarSource,
-    /className="sidebar-session-group-title project-toggle"[\s\S]*?tooltip=\{entry\.path\}[\s\S]*?tooltipDelayMs=\{500\}[\s\S]*?aria-describedby=\{`\$\{projectId\}-path-description`\}/,
+    /className="sidebar-session-group-title project-toggle"[\s\S]*?tooltip=\{entry\.displayPath \?\? entry\.path\}[\s\S]*?tooltipDelayMs=\{500\}[\s\S]*?aria-describedby=\{`\$\{projectId\}-path-description`\}/,
   );
   assert.match(sidebarSource, /<TooltipButton/);
   assert.match(globalStyles, /\.ui-tooltip-path\s*\{[^}]*width:\s*max-content/);
   assert.match(globalStyles, /\.ui-tooltip-path\s*\{[^}]*max-width:\s*min\(420px,\s*calc\(100vw - 16px\)\)/);
-  assert.match(sidebarSource, /className="sr-only">\s*\{entry\.path\}/);
+  // The hover text and its accessible description name the path the project
+  // really lives at: the remote workspace path for a remote project.
+  assert.match(sidebarSource, /className="sr-only">\s*\{entry\.displayPath \?\? entry\.path\}/);
 });
 
 test("sidebar row menus omit project reassignment and switching actions", () => {
@@ -266,13 +272,14 @@ test("sidebar row menus omit project reassignment and switching actions", () => 
   );
 });
 
-test("session rows use the hover card instead of a native title tooltip", () => {
-  const sessionMain = sidebarSource.match(
-    /className="thread-item-main"[\s\S]*?<\/button>/,
-  )?.[0] ?? "";
+test("session title buttons use hover cards without native title tooltips", () => {
+  const sessionMainStart = sidebarSource.indexOf('className="thread-item-main"');
+  const sessionMainEnd = sidebarSource.indexOf(">\n          {sessionPinned", sessionMainStart);
+  const sessionMain = sessionMainStart >= 0 && sessionMainEnd >= 0
+    ? sidebarSource.slice(sessionMainStart, sessionMainEnd)
+    : "";
 
   assert.match(sessionMain, /showSessionHoverCard\(/);
-  assert.doesNotMatch(sessionMain, /title=\{taskTitle\(session\.title\)\}/);
   assert.doesNotMatch(sessionMain, /\btitle=\{/);
   assert.match(hoverSource, /className="sidebar-session-hover-card"/);
   assert.match(hoverSource, /className="sidebar-session-hover-card-title"/);

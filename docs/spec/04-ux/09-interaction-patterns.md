@@ -229,12 +229,13 @@ may be retained while exactly one workspace supplies the visible shell context.
    bridge. Its path then drives topbar identity, active workspace state, and
    new-task scope.
 3. **Collapse** — disclosure state belongs to each project path. Collapsing
-   hides children only; it neither changes the selected session nor stops a
-   run. The directory row is one full-width disclosure target containing its
-   chevron, folder, and label: selecting an inactive directory activates it
-   first, and every directory-row click toggles that group's children without
-   changing any other group's state. Project actions are separate sibling
-   controls and never toggle the directory.
+   does not change the selected session or stop a run, and clears that group's
+   loaded-more session history so its next expansion starts with the initial
+   ten unpinned sessions. The directory row is one full-width disclosure target
+   containing its chevron, folder, and label: selecting an inactive directory
+   activates it first, and every directory-row click toggles that group's
+   children without changing any other group's state. Project actions are
+   separate sibling controls and never toggle the directory.
 4. **Close** — closing removes only the retained tab. If it was active, the
    last remaining tab is selected or the visible workspace is cleared. Durable
    projects, sessions, and transcripts remain.
@@ -249,8 +250,10 @@ may be retained while exactly one workspace supplies the visible shell context.
 - **Edit project** — the project overflow menu in the sidebar and Project
   archive opens the same editor for the selected logical project. The editor
   trims and persists a 1–80 Unicode-code-point group name and lists every
-  registered folder. The Primary folder stays first and cannot be removed;
-  additional folders can be added through the native multi-selection picker or
+  registered folder. The Primary folder stays first and cannot be removed, and
+  every other folder row offers a Set as Primary action that promotes it to the
+  top and makes it the group's primary root on save; additional folders can be
+  added through the native multi-selection picker or
   removed individually. Saving updates group membership without rewriting path
   identities, workspace identity, session ownership, transcripts, or on-disk
   folders. Removing an additional folder with chats detaches it as a standalone
@@ -271,7 +274,8 @@ may be retained while exactly one workspace supplies the visible shell context.
   permanent delete, and the folder on disk is never touched. A project whose
   turn is still live still opens the confirmation dialog that names those
   sessions and stops them first; an idle project is removed on that second
-  click.
+  click. Sidebar overflow menus stay inside the window; a tall menu scrolls
+  within the available viewport so its last action remains reachable.
 - **Create branch** snapshots an idle conversation's complete active
   transcript into an independent session in the same project/Temporary scope.
   The command is disabled while the source runs. Success selects the child and
@@ -856,6 +860,12 @@ may be retained while exactly one workspace supplies the visible shell context.
 - The context usage inspector keeps one muted line for the newest checkpoint,
   shown while its panel is open — the count and summary cost sit below the
   compact model/tool usage summaries without adding explanatory copy.
+- The open context usage inspector also shows the session's elapsed wall time
+  and the cumulative duration of its top-level model responses. The response
+  percentage compares those recorded request-to-completion durations with the
+  session span; nested delegate responses are excluded because they may overlap.
+  Long transcripts load earlier response timings in bounded pages only while
+  the inspector is open.
 
 ## 4. Long content collapse / expand
 
@@ -885,11 +895,12 @@ may be retained while exactly one workspace supplies the visible shell context.
   groups otherwise start closed. Compact starts the process and groups closed,
   except an untouched active process with any recorded failed/denied tool remains
   open through recovery and closes on completion.
-- In Detailed, leaf auto-open applies only when the literal final item of the last
-  activity group is an eligible tool-call or hosted-search row. Failed/denied
-  items stay closed, and a final thinking item never causes a backward scan.
-  Compact keeps every item payload closed and hides reasoning text/excerpts while
-  retaining its active thinking indicator.
+- No item payload opens itself in either mode: a tool, hosted-search or plan call
+  stays a header row until the user opens it, including the literal final item of
+  the last activity group. Group and whole-process defaults are unchanged, so a
+  final thinking item never causes a backward scan. Compact keeps every item
+  payload closed and hides reasoning text/excerpts while retaining its active
+  thinking indicator.
 - Activating a process, group or item header toggles only that level. Closing a
   parent preserves child state, reopening restores it, and sibling groups remain
   independent. Opening a parent is never an expand-all action.

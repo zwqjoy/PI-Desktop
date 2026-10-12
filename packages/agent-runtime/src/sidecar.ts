@@ -123,6 +123,7 @@ type RuntimeParams = {
   scratchDir?: string;
   /** Session-bound workspace root supplied by Electron main. */
   projectPath?: string;
+  remoteWorkspace?: { hostKey: string; path: string };
   customSystemPrompt?: CustomSystemPrompt;
   projectInstructions?: ProjectInstructions;
   projectMemory?: string;
@@ -236,6 +237,7 @@ async function runtimeFor(
     customSystemPrompt: params.customSystemPrompt,
     projectMemory: params.projectMemory,
     projectPath: params.projectPath,
+    remoteWorkspace: params.remoteWorkspace,
     commandShell: params.commandShell,
   })
     ? existing
@@ -272,7 +274,7 @@ async function runtimeFor(
     const supportsVision = visionFromModelConfig(params.provider.modelConfig);
     history = await hydrateAttachmentHistory(restoredMessages, {
       scratchDir: params.scratchDir,
-      projectPath: params.projectPath,
+      projectPath: params.remoteWorkspace ? undefined : params.projectPath,
       attachmentsDir: params.attachmentsDir,
       supportsVision,
     });
@@ -307,6 +309,7 @@ async function runtimeFor(
     subagentProviders,
     subagentModelKeys,
     projectPath: params.projectPath,
+    remoteWorkspace: params.remoteWorkspace,
     customSystemPrompt: params.customSystemPrompt,
     projectInstructions: params.projectInstructions,
     projectMemory: params.projectMemory,
@@ -536,6 +539,16 @@ async function handle(method: string, params: any): Promise<unknown> {
         await runtime.abort();
       }
       return { ok: true };
+    }
+    case "agent.stopSubagents": {
+      const runtime = runtimes.get(String(params.sessionId));
+      if (!runtime) throw new Error("No active runtime for this session");
+      const ids = params.delegationIds;
+      if (ids !== undefined && (!Array.isArray(ids) || ids.length === 0 || ids.length > 100 || ids.some(id => typeof id !== "string" || !id.trim()))) {
+        throw new Error("Invalid delegation IDs");
+      }
+      const result = await runtime.stopSubagents(ids as string[] | undefined);
+      return { pending: result.details.stopPending?.flatMap(record => typeof record.delegationId === "string" ? [record.delegationId] : []) ?? [] };
     }
     case "agent.stop": {
       const sessionId = String(params.sessionId);

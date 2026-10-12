@@ -1,6 +1,10 @@
 import type { WorkspaceHubCommand, WorkspaceHubSnapshot } from "@pi-desktop/shared";
 import { projectPlanHistory } from "./plan-history";
+import { guardRemoteInvocation } from "./remote-ipc-safety";
+import { isRemoteSession, safeSessionSummary } from "./remote-session-safety";
 import type {
+  ConfigSyncTestInput,
+  ConfigSyncTestResult,
   ScheduledTaskRun,
   ActivationScope,
   AgentCapabilityMove,
@@ -13,15 +17,13 @@ import type {
   UiMessage,
   MessageRevisionSummary,
   AgentPromptResponse,
-  PromptEnhancementRequest,
-  PromptEnhancementResponse,
   SpeechStatus,
   SpeechSynthesizeRequest,
   SpeechSynthesizeResult,
   SpeechTranscribeRequest,
-  SessionSummarizeTitleRequest,
-  SessionSummarizeTitleResponse,
   AgentStopResponse,
+  AgentStopSubagentsRequest,
+  AgentStopSubagentsResponse,
   AgentQueueChangedEvent,
   AgentQueuePushRequest,
   QueuedTurnSummary,
@@ -63,6 +65,7 @@ import type {
   PluginPermissionReview,
   PluginSettingDefinition,
   PluginServiceStatus,
+  PluginProviderCatalogMeta,
   PluginViewMeta,
   PluginScenicThemesDestinationMeta,
   PluginTheme,
@@ -89,6 +92,7 @@ import type {
   SessionCollaborationSummary,
   TraySessionPreferences,
   ToolPermissionResolution,
+  BuiltinSkillRecord,
   UserSkillInput,
   UserSkillRecord,
   UserSubagentInput,
@@ -105,11 +109,20 @@ import type {
   PlanResolutionResult,
   PlanningStateEvent,
   PlansPendingResult,
+  RemoteHostProjectsResult,
+  RemoteHostBrowseProjectsResult,
+  RemoteHostRegisterProjectResult,
+  RemoteHostSessionsResult,
+  RemoteHostCreateSessionRequest,
+  RemoteHostCreateSessionResult,
+  RemoteHostSyncProvidersRequest,
+  RemoteHostSyncProvidersResult,
   RemoteHostBootstrapRequest,
   RemoteHostBootstrapResult,
   RemoteHostPairRequest,
   RemoteHostPairResult,
   RemoteHostSummary,
+  RemoteInteractionUpdate,
   UpdateState,
   WindowControlAction,
   CloseBehavior,
@@ -314,6 +327,7 @@ declare global {
 }
 
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
+  guardRemoteInvocation(channel, args[0]);
   if (!window.piDesktop?.invoke) {
     throw new Error("piDesktop preload bridge unavailable");
   }
@@ -332,8 +346,8 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 
 function normalizeSession(session: SessionSummary): SessionSummary {
   return {
-    ...session,
-    source: session.source ?? "desktop",
+    ...safeSessionSummary(session),
+    source: isRemoteSession(session) ? "remote" : session.source ?? "desktop",
     mode: normalizeMode((session as { mode?: unknown }).mode),
   };
 }
@@ -341,7 +355,7 @@ function normalizeSession(session: SessionSummary): SessionSummary {
 function normalizeSessionDetail(detail: SessionDetail | null): SessionDetail | null {
   return detail
     ? {
-        ...detail,
+        ...safeSessionSummary(detail),
         messages: projectPlanHistory(detail.messages, detail.planHistory ?? [], detail.id),
         mode: normalizeMode((detail as { mode?: unknown }).mode),
       }
@@ -625,13 +639,14 @@ export const api = {
     invoke<{ ok: boolean; path: string }>(IPC.invoke.projectOpenFolder, path),
   renameSession: (id: string, title: string) =>
     invoke<{ ok: boolean }>(IPC.invoke.sessionRename, id, title),
+  /** Ask the host for a first-prompt title; it refuses a renamed session. */
+  deriveSessionTitle: (id: string, title: string) =>
+    invoke<{ updated: boolean }>(IPC.invoke.sessionDeriveTitle, id, title),
   moveSessionProject: (sessionId: string, projectPath: string) =>
     invoke<{ session: SessionSummary }>(IPC.invoke.sessionMoveProject, {
       sessionId,
       projectPath,
     }).then((result) => ({ ...result, session: normalizeSession(result.session) })),
-  summarizeSessionTitle: (req: SessionSummarizeTitleRequest) =>
-    invoke<SessionSummarizeTitleResponse>(IPC.invoke.sessionSummarizeTitle, req),
   configureSession: (
     id: string,
     config: Pick<SessionSummary, "mode" | "providerId" | "modelId"> &
@@ -682,16 +697,8 @@ export const api = {
   configSyncGetState: () => invoke<ConfigSyncState>(IPC.invoke.configSyncGetState),
   configSyncConfigure: (input: ConfigSyncConfigureInput) =>
     invoke<ConfigSyncState>(IPC.invoke.configSyncConfigure, input),
-  configSyncTest: (input: Omit<ConfigSyncConfigureInput, "backupPassword"> & { backupPassword?: string }) =>
-    invoke<{
-      ok: boolean;
-      conditionalWrites: boolean;
-      appendOnly: boolean;
-      message?: string;
-    }>(
-      IPC.invoke.configSyncTest,
-      input,
-    ),
+  configSyncTest: (input: ConfigSyncTestInput) =>
+    invoke<ConfigSyncTestResult>(IPC.invoke.configSyncTest, input),
   configSyncSyncNow: () => invoke<ConfigSyncState>(IPC.invoke.configSyncSyncNow),
   configSyncPause: (paused: boolean) =>
     invoke<ConfigSyncState>(IPC.invoke.configSyncPause, { paused }),
@@ -836,15 +843,25 @@ export const api = {
     invoke<WorkspaceHubSnapshot>(IPC.invoke.workspaceHubChange, { expectedRevision, command }),
   listProjectGroups: () =>
     invoke<{ groups: ProjectGroupRecord[] }>(IPC.invoke.projectGroupList),
+  createRemoteProjectGroup: (name: string, hostKey: string, path: string) =>
+    invoke<{ group: ProjectGroupRecord }>(IPC.invoke.projectGroupCreateRemote, { name, hostKey, path }),
   createProjectGroup: (name: string, folders: string[]) =>
     invoke<{ group: ProjectGroupRecord }>(IPC.invoke.projectGroupCreate, { name, folders }),
   renameProjectGroup: (groupId: string, name: string) =>
     invoke<{ group: ProjectGroupRecord }>(IPC.invoke.projectGroupRename, { groupId, name }),
-  updateProjectGroup: (groupId: string, name: string, folders: string[]) =>
+  // `primary` names the folder that becomes the group's primary root; the host
+  // keeps the stored one when it is omitted.
+  updateProjectGroup: (
+    groupId: string,
+    name: string,
+    folders: string[],
+    primary?: string,
+  ) =>
     invoke<{ group: ProjectGroupRecord }>(IPC.invoke.projectGroupUpdate, {
       groupId,
       name,
       folders,
+      ...(primary ? { primary } : {}),
     }),
   getProjectGroupMemory: (groupId: string) =>
     invoke<{ memory: ProjectMemory }>(IPC.invoke.projectGroupMemoryGet, { groupId }),
@@ -964,8 +981,6 @@ export const api = {
     invoke<AgentPromptResponse>(IPC.invoke.agentSteer, req),
   prompt: (req: AgentPromptRequest) =>
     invoke<AgentPromptResponse>(IPC.invoke.agentPrompt, req),
-  enhancePrompt: (req: PromptEnhancementRequest) =>
-    invoke<PromptEnhancementResponse>(IPC.invoke.promptEnhance, req),
   speechStatus: () => invoke<SpeechStatus>(IPC.invoke.speechGetStatus),
   speechTranscribe: (req: SpeechTranscribeRequest) =>
     invoke<{ text: string }>(IPC.invoke.speechTranscribe, req),
@@ -975,6 +990,8 @@ export const api = {
     invoke<AgentCompactResponse>(IPC.invoke.agentCompact, req),
   abort: (sessionId: string) =>
     invoke(IPC.invoke.agentAbort, { sessionId }),
+  stopSubagents: (req: AgentStopSubagentsRequest) =>
+    invoke<AgentStopSubagentsResponse>(IPC.invoke.agentStopSubagents, req),
   stop: (sessionId: string, turnId?: string) =>
     invoke<AgentStopResponse>(IPC.invoke.agentStop, { sessionId, ...(turnId ? { turnId } : {}) }),
   queuePrompt: (req: AgentQueuePushRequest) =>
@@ -1058,6 +1075,12 @@ export const api = {
     invoke(IPC.invoke.pluginSetAutoUpdate, { id, enabled }),
   getPluginSettings: (id: string) =>
     invoke<{ settings: PluginSettingDefinition[] }>(IPC.invoke.pluginSettingsGet, id),
+  runPluginComposerTransform: (input: {
+    pluginId: string;
+    id: string;
+    text: string;
+    modelKey?: string;
+  }) => invoke<string>(IPC.invoke.pluginComposerTransform, input),
   setPluginSettings: (id: string, settings: Record<string, unknown>) =>
     invoke<{ settings: PluginSettingDefinition[] }>(IPC.invoke.pluginSettingsSet, {
       id,
@@ -1163,6 +1186,10 @@ export const api = {
     ),
 
   // --- Skills the user owns -------------------------------------------------
+  listBuiltinSkills: () =>
+    invoke<{ builtins: BuiltinSkillRecord[] }>(IPC.invoke.skillBuiltinList),
+  setBuiltinSkillEnabled: (id: string, enabled: boolean) =>
+    invoke<{ id: string; enabled: boolean }>(IPC.invoke.skillBuiltinSetEnabled, { id, enabled }),
   listUserSkills: (query?: AgentCapabilityQuery) =>
     invoke<{ skills: UserSkillRecord[] }>(IPC.invoke.skillList, query),
   createUserSkill: (skill: UserSkillInput) =>
@@ -1275,6 +1302,8 @@ export const api = {
   togglePluginLauncher: () => invoke(IPC.invoke.pluginLauncherToggle),
   dismissPluginLauncher: () => invoke(IPC.invoke.pluginLauncherDismiss),
   listPluginThemes: () => invoke<PluginTheme[]>(IPC.invoke.pluginThemes),
+  listPluginProviderCatalog: () =>
+    invoke<PluginProviderCatalogMeta[]>(IPC.invoke.pluginProviderCatalog),
   listPluginScenicThemesDestinations: () => invoke<PluginScenicThemesDestinationMeta[]>(IPC.invoke.pluginScenicThemesDestinations),
   setPluginScenicThemeBlur: (pluginId: string, themeId: string, blur: number) => invoke(IPC.invoke.pluginScenicThemesSetBlur, { pluginId, themeId, blur }),
   listPluginServices: () => invoke<PluginServiceStatus[]>(IPC.invoke.pluginServices),
@@ -1383,7 +1412,7 @@ export const api = {
   /** Toggles the devtools console; rejects unless developer mode is on. */
   toggleDevTools: (open?: boolean) =>
     invoke<{ open: boolean }>(IPC.invoke.devtoolsToggle, { open }),
-  workspaceDiff: () => invoke<WorkspaceDiff>(IPC.invoke.workspaceDiff),
+  workspaceDiff: (sessionId?: string) => invoke<WorkspaceDiff>(IPC.invoke.workspaceDiff, { ...(sessionId ? { sessionId } : {}) }),
   workspaceReviewRollback: (input: {
     sessionId: string;
     snapshotId: string;
@@ -1404,22 +1433,24 @@ export const api = {
     invoke(IPC.invoke.browserOpenExternal, url ? { url } : {}),
   browserGetState: () =>
     invoke<BrowserState | null>(IPC.invoke.browserGetState),
-  fsList: (path?: string) =>
-    invoke<{ entries: FsEntry[] }>(IPC.invoke.fsList, { path: path ?? "" }),
-  fsRead: (path: string, mimeType?: string) =>
+  fsList: (path?: string, sessionId?: string) =>
+    invoke<{ entries: FsEntry[] }>(IPC.invoke.fsList, { path: path ?? "", ...(sessionId ? { sessionId } : {}) }),
+  fsRead: (path: string, mimeType?: string, sessionId?: string) =>
     invoke<FsReadResult>(IPC.invoke.fsRead, {
       path,
       ...(mimeType ? { mimeType } : {}),
+      ...(sessionId ? { sessionId } : {}),
     }),
-  fsReadImageDataUrl: (ref: string, mimeType?: string) =>
+  fsReadImageDataUrl: (ref: string, mimeType?: string, sessionId?: string) =>
     invoke<FsImageDataUrlResult>(IPC.invoke.fsReadImageDataUrl, {
       ref,
       ...(mimeType ? { mimeType } : {}),
+      ...(sessionId ? { sessionId } : {}),
     }),
-  fsReveal: (path: string) => invoke(IPC.invoke.fsReveal, { path }),
-  fsOpen: (path: string, mimeType?: string) =>
-    invoke(IPC.invoke.fsOpen, { path, mimeType }),
-  fsIndex: () => invoke<FsIndexResult>(IPC.invoke.fsIndex),
+  fsReveal: (path: string, sessionId?: string) => invoke(IPC.invoke.fsReveal, { path, ...(sessionId ? { sessionId } : {}) }),
+  fsOpen: (path: string, mimeType?: string, sessionId?: string) =>
+    invoke(IPC.invoke.fsOpen, { path, mimeType, ...(sessionId ? { sessionId } : {}) }),
+  fsIndex: (sessionId?: string) => invoke<FsIndexResult>(IPC.invoke.fsIndex, { ...(sessionId ? { sessionId } : {}) }),
   /**
    * Complete a file reference from chat text to a real file (D320 follow-up).
    * The main process owns the root order — project, session scratch,
@@ -1519,11 +1550,23 @@ export const api = {
     );
   },
   onBrowserPreview: (
-    listener: (event: { sessionId: string; path?: string; url?: string }) => void,
+    listener: (event: {
+      sessionId: string;
+      path?: string;
+      url?: string;
+      tabId?: string;
+      revealOnly?: boolean;
+    }) => void,
   ) => {
     if (!window.piDesktop?.on) return () => undefined;
     return window.piDesktop.on(IPC.event.browserPreview, (payload) =>
-      listener(payload as { sessionId: string; path?: string; url?: string }),
+      listener(payload as {
+        sessionId: string;
+        path?: string;
+        url?: string;
+        tabId?: string;
+        revealOnly?: boolean;
+      }),
     );
   },
   onAgentEvent: (listener: (event: AgentEventEnvelope) => void) => {
@@ -1624,6 +1667,30 @@ export const api = {
   /** Close and drop a paired host by its stable routing key. */
   removeRemoteHost: (hostKey: string) =>
     invoke<{ ok: true }>(IPC.invoke.remoteHostRemove, { hostKey }),
+  reconnectRemoteHost: (hostKey: string) =>
+    invoke<{ host: RemoteHostSummary }>(IPC.invoke.remoteHostReconnect, { hostKey }),
+  remoteHostBrowseProjects: (hostKey: string, path?: string) =>
+    invoke<RemoteHostBrowseProjectsResult>(IPC.invoke.remoteHostBrowseProjects, { hostKey, ...(path === undefined ? {} : { path }) }),
+  remoteHostProjects: (hostKey: string) =>
+    invoke<RemoteHostProjectsResult>(IPC.invoke.remoteHostProjects, { hostKey }),
+  registerRemoteProject: (hostKey: string, path: string) =>
+    invoke<RemoteHostRegisterProjectResult>(IPC.invoke.remoteHostRegisterProject, { hostKey, path }),
+  remoteHostSessions: (hostKey: string) =>
+    invoke<RemoteHostSessionsResult>(IPC.invoke.remoteHostSessions, { hostKey }),
+  createRemoteSession: (request: RemoteHostCreateSessionRequest) =>
+    invoke<RemoteHostCreateSessionResult>(IPC.invoke.remoteHostCreateSession, request),
+  syncRemoteProviders: (request: RemoteHostSyncProvidersRequest) =>
+    invoke<RemoteHostSyncProvidersResult>(IPC.invoke.remoteHostSyncProviders, request),
+  remoteWorkspaceList: (sessionId: string, path = "") =>
+    invoke<{ entries: FsEntry[] }>(IPC.invoke.fsList, { sessionId, path }),
+  remoteWorkspaceRead: (sessionId: string, path: string) =>
+    invoke<FsReadResult>(IPC.invoke.fsRead, { sessionId, path }),
+  remoteWorkspaceDiff: (sessionId: string) =>
+    invoke<WorkspaceDiff>(IPC.invoke.workspaceDiff, { sessionId }),
+  onRemoteInteractions: (listener: (event: RemoteInteractionUpdate) => void) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.remoteInteractions, (payload) => listener(payload as RemoteInteractionUpdate));
+  },
   onSessionsChanged: (
     listener: (event: {
       reason?: string;

@@ -442,9 +442,10 @@ visually distinct from list content.
 | Archived row | Hidden by default; visible in the explicit archived view |
 | No retained project | Compact Open project entry; standalone Sessions rows remain available |
 | Empty group | Muted one-line empty state; group create action remains available |
-| Default session title | New task/New chat (localized where applicable) until the first prompt |
-| First prompt title | A normalized 48-character prompt fallback appears immediately; after the first turn, a successful background summary replaces it |
-| Manual session title | User-defined title remains stable across refresh and renderer restart; automatic summary never overwrites it |
+| Default session title | New task/New chat (localized where applicable) until the first prompt, the user, or an installed title plugin sets one |
+| First prompt title | A normalized 48-character prompt fallback appears immediately and is stored as a still-replaceable automatic title |
+| Plugin-generated session title | A title plugin may replace that automatic title after the first completed turn when its permission is granted |
+| Manual session title | User-defined title remains stable across refresh and renderer restart; automatic titles (local fallback or plugin) never overwrite it |
 | Footer idle | Transparent 58px band; build and action controls remain visually quiet |
 | Footer hover/focus | Only the targeted control receives the semantic hover/focus treatment |
 | Profile menu open | Profile trigger is active; 280px menu opens 8px above the footer |
@@ -544,10 +545,14 @@ visually distinct from list content.
   the workspace list with a softly filled Add folder action; the field does not
   repeat its label as placeholder text and uses the shared field well plus the
   accent-tinted focus ring, not an outline stroke. Edit project reuses the same
-  surface, loads the host-owned group, allows the name and non-primary folders
-  to be adjusted, keeps Primary first and non-removable, and rejects removal of
-  a folder that still owns chats. Background session or run-status updates
-  must preserve unsaved name and folder edits in the open editor. The source selector offers This computer and
+  surface, loads the host-owned group, allows the name and folders to be
+  adjusted, keeps the Primary folder first and non-removable, and rejects
+  removal of a folder that still owns chats. Every other folder row carries a
+  Set as Primary action that promotes it: the row moves to the top, the Primary
+  tag moves with it, and the host stores the promoted folder as the group's
+  primary root on save. A remote project keeps its host-owned binding and shows
+  no promotion action. Background session or run-status updates
+  must preserve unsaved name, folder, and primary edits in the open editor.
   Git repository as equal filled tiles without strokes (D297); the active source
   uses a deeper tile, not a selected border. A repository URL reuses the clone
   rules of ADR 0247 and its checkout becomes the primary root of the same group.
@@ -729,7 +734,7 @@ controls.
 | Project close | removes retained tab only; durable project/sessions remain |
 | Project delete | row-menu danger action behind a second confirmation that names the project and the number of its sessions; refused with a message while any of those sessions is running and leaves group membership unchanged; removes the durable project row, those sessions, their transcripts, and its project memory; never deletes the folder on disk; deleting a root of a multi-folder project group detaches it as part of deletion, promotes the first remaining root when the primary is deleted, and removes the group record when its last root is deleted. A path the host no longer knows is still removed from the list. Detaching a root with chats through Edit project preserves them under a standalone project |
 | Project memory | row-menu editor reads and saves a compact list of titled or untitled memory cards for the exact project path; cards can be added, edited, and removed, the context is available in later chats, and it is never a higher-priority instruction |
-| Session list | exact-path matches only; no basename grouping |
+| Session list | exact-path matches only; no basename grouping; the latest ten unpinned sessions appear initially, Load more reveals the remaining history, and collapsing the project clears that expanded-list state so the next expansion returns to the initial ten |
 | Active group | exactly one group reflects the selected host workspace |
 | Task state | In-progress, selected, completed, and failed indicators update by session without replacing the visible transcript; precedence is in-progress, selected, then terminal outcome |
 
@@ -864,11 +869,11 @@ through later successful recovery, and closes on completion if still untouched.
 Group headers summarize count, running state and issue count without treating a
 failed child as a failed turn.
 
-In Detailed, only the literal final item of the last activity group receives the
-leaf auto-open default when it is an eligible tool-call or hosted-search row.
-Failed and denied rows remain closed, and a final thinking item does not cause a
-backward scan for an earlier tool. Compact keeps all tool/search payloads closed and
-suppresses reasoning text and excerpts; only its active thinking indicator remains.
+No item payload opens itself in either mode: a tool, hosted-search or plan call
+stays a header row until the user opens its disclosure. The activity group and
+the whole process keep their automatic open defaults, so a live turn still shows
+its work. Compact keeps all tool/search payloads closed and suppresses reasoning
+text and excerpts; only its active thinking indicator remains.
 
 Whole process, group and item are independent controls. Closing an ancestor keeps
 descendant choices and reopening restores them; opening a parent never expands all
@@ -1889,7 +1894,8 @@ Single message render — either user (plaintext) or assistant (markdown streami
   capacity, used/window counts, turn total, and provider
   input/output/cache/reasoning/hit-rate are that turn's newest usage-bearing
   assistant message (the last model request), using
-  `input + output + reasoning + cacheRead + cacheWrite` (D355). They are not
+  `input + output + cacheRead + cacheWrite` (D355; `output` already carries the
+  reasoning tokens, so `reasoningTokens` is never added again). They are not
   the sum of every model call in the visual tool-loop. It is hidden until that
   usage exists. The trigger keeps a small capacity ring beside the
   percentage and omits the redundant `Context` label; the leading figure
@@ -2217,10 +2223,9 @@ ordinary processing group only when it has two or more visible items. A singleto
 uses its item disclosure directly, and Task topology keeps its existing container.
 While the turn is active, the ordinary group owning the execution segment opens in
 Detailed and remains closed in Compact; when it settles, an untouched Detailed
-group closes. Detailed auto-opens a leaf payload only when the literal final item
-of the last activity group is an eligible tool-call or hosted-search row. Earlier,
-failed and denied rows remain closed, and a final thinking item does not select an
-earlier tool. Compact keeps every tool/search payload closed.
+group closes. No item payload opens itself in either mode: a tool, hosted-search
+or plan row stays a header row until the user opens it, whichever item of the
+group it is. Compact keeps every tool/search payload closed.
 
 The group header shows `Processing · 12s` while active or `Processed for 12s`
 after completion, plus bounded item and issue counts. Expanding it reveals the
@@ -2252,10 +2257,9 @@ seconds when non-zero) from one hour onward. Zero-value units are omitted, so
   in the transcript after completion. In Detailed the active group starts open and
   closes on completion only if untouched; completed groups otherwise start closed.
   Compact groups start closed. A singleton has no group header.
-- Tool/search payloads remain collapsed in Compact. In Detailed, only an eligible
-  literal final item of the last activity group starts expanded; failed/denied
-  items remain closed, and a final thinking item does not select an earlier tool.
-  Live thinking follows its own disclosure policy and never opens sibling payloads.
+- Tool/search payloads stay collapsed in both modes until the user opens them; no
+  row auto-opens, so a final thinking item never selects an earlier tool. Live
+  thinking follows its own disclosure policy and never opens sibling payloads.
 - The processing group spans the full available assistant column, so expanded
   result details keep a usable width even when the header or payload is short.
 - The visible label is a natural-language action (`Read`, `Ran`, `Searched`),
@@ -2328,17 +2332,16 @@ twice.
 
 | State | Header treatment | Expanded content |
 |---|---|---|
-| Running | Progressive action with readable text and a pulsing marker; a `run` row also shows its spinner and pulses the status dot beside `Working…` | Detailed opens the active multi-item group; only an eligible literal-final tool/search payload opens. Compact payloads stay closed; live thinking follows its own indicator/disclosure policy |
-| Success | Past-tense action + result chips; no green success badge, except a `run` row's dot and `Done` | Result blocks, then arguments if not already shown; an untouched active group closes on completion, while manual group/item choices and the detailed literal-final leaf state are retained |
+| Running | Progressive action with readable text and a pulsing marker; a `run` row also shows its spinner and pulses the status dot beside `Working…` | Detailed opens the active multi-item group; no item payload opens itself. Compact payloads stay closed; live thinking follows its own indicator/disclosure policy |
+| Success | Past-tense action + result chips; no green success badge, except a `run` row's dot and `Done` | Result blocks, then arguments if not already shown; an untouched active group closes on completion, while manual group and item choices are retained |
 | Error | Past-tense action + compact danger status; details remain collapsed by default and open only on user request. A `run` row is in this state whenever its command exited nonzero, whatever the call reported (D227) | Error note first, then arguments |
 | Denied | Muted `Denied` status; payload remains closed until requested | Permission result when available |
 
 ### 9.6 Interactions
 
 - Click the row: expand/collapse only that result payload. Compact payloads start
-  closed. Detailed starts a payload open only when the row is the eligible literal
-  final item of the last activity group; earlier, failed and denied rows remain
-  closed until the user opens them.
+  closed. No payload opens itself in either mode, so the row the user opens is the
+  only expanded one; failed and denied rows behave the same.
 - A file path that a row or its result names is a link, not decoration: clicking
   the summary path of a `Read`, `Write`, `Edit`, or `fetch` row, or a path in a
   result's file list or match groups, completes the reference through the same
@@ -2570,6 +2573,12 @@ as a conversation:
   state (`running`, `error`, `denied`, `success`). Clicking the node expands the
   existing brief/report/counters and nested rows; the report remains printed
   exactly once.
+- Local Desktop running nodes with a delegation handle expose a separate Stop
+  button; the delegate detail panel exposes the same action. The group header
+  offers Stop all subagents for the current session. These actions do not open
+  a model turn or stop the coordinator. Pending cancellation disables duplicate
+  submission and reads Stopping; terminal nodes have no Stop action. Existing
+  output remains readable, including partial output from stopped delegates.
 - A topology that first appears while the turn is active opens once so progress
   is visible, then closes when its activity settles if the user has not
   interacted with the card. Reloaded history remains collapsed by default. A
@@ -2823,16 +2832,16 @@ reasoning-level control.
   beside its selection indicator.
 - The right toolbar owns the remaining-capacity context inspector (when the
   newest assistant turn has usage) immediately left of one combined model ×
-  reasoning-level chip, then the standalone prompt-enhancement action and the
-  single Stop/Send submit slot (D347). The inspector trigger shows the ring
+  reasoning-level chip. Explicitly installed plugins may add user-invoked
+  Composer text actions after it; there is no built-in prompt-enhancement
+  action. The single Stop/Send submit slot follows plugin actions (D347). The inspector trigger shows the ring
   and percentage only. The chip shows Bot, the current model name, and the
   current canonical reasoning level value separated by `·`; `off` omits the
   level text. The canonical value is rendered as-is (`low`, `high`, `xhigh`,
-  or `max`) and is not localized. The
-  prompt-enhancement action shows Sparkles while idle, uses the shared
-  `.tool-spinner` and localized `Enhancing…` label while running, and remains
-  a one-shot draft rewrite action. Inline file-reference chips, including
-  pasted image chips, do not disable this action and remain in the draft.
+  or `max`) and is not localized. A contributed text action uses its plugin
+  title and shows a spinner while its callback runs. The callback receives only
+  the draft and optional model key; the host strips and restores inline file
+  reference tokens, including pasted image chips, around the transform.
 - MainPane and the chat surface keep a 450px hard minimum. The composer toolbar
   remains a single, non-wrapping row as its container narrows: the mode and
   permission labels stay on one line and ellipsize within their chips, while
@@ -2840,8 +2849,8 @@ reasoning-level control.
   560px it hides the reasoning level label, at 480px it tightens the model label
   cap, and at the 450px floor it becomes a 32px icon-only trigger. The trigger's
   menu and accessible name retain the complete model/reasoning selection. The
-  context inspector hides its percentage at the floor and the enhancement
-  loading state becomes icon-only, preserving the action hit targets without
+  context inspector hides its percentage at the floor and plugin action
+  loading states remain icon-only, preserving the action hit targets without
   clipping or overlapping toolbar content. Home and thread-docked composers
   use the same responsive rules.
 - The combined chip opens one anchored menu above itself. The menu starts with
@@ -3956,7 +3965,7 @@ default nor provider configuration. OAuth accounts remain in their separate sect
 | Busy row | Test/update/delete actions disabled for that card |
 
 ### 19.4 Interactions
-- Add provider opens a modal dialog on a full-window overlay portaled to `#pi-desktop-overlays` on the document element (it can shrink below its 1040px preferred width). Focused credential fields keep their 2px accent ring fully visible: the scrolling body reserves that gutter instead of clipping the ring. Cancel/close resets fields and dismisses the dialog
+- Add provider opens a modal dialog on a full-window overlay portaled to `#pi-desktop-overlays` on the document element (it can shrink below its 1040px preferred width). The chooser groups unconfigured API-key providers declared by loaded plugins under their optional category, searches their category / plugin / provider / endpoint / model labels, and shows the plugin name and endpoint on each tile. Selecting one opens a Host-owned key form for its existing provider row; saving uses the provider secret path and removes that row from the chooser. Category and provider metadata render as text. Focused credential fields keep their 2px accent ring fully visible: the scrolling body reserves that gutter instead of clipping the ring. Cancel/close resets fields and dismisses the dialog
 - The model picker searches and toggles multiple models without using a native
   multiple select. Its portaled menu closes on outside press, Escape, scroll,
   and resize; model selection immediately adds or removes its configuration
