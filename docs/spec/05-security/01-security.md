@@ -46,8 +46,9 @@ Required (all **implemented**):
   admitting remote font origins.
 - Production build: `'unsafe-eval'` and localhost connect-src are stripped
   at build time (`tightenCsp` plugin in `electron.vite.config.ts`);
-  `connect-src 'self'` only. Provider network traffic happens in the Node
-  sidecar, never in the renderer.
+  `connect-src 'self' plugin-renderer:` only. The custom scheme serves only
+  active, granted plugin modules and their bounded package-local assets.
+  Provider network traffic happens in the Node sidecar, never in the renderer.
 - Assistant Mermaid diagrams do not widen CSP or renderer privileges. Only a
   completed answer fence may dynamically load the bundled local renderer.
   Mermaid runs with `securityLevel: strict`, protected security/theme/limit

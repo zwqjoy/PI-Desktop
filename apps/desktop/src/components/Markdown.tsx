@@ -426,6 +426,9 @@ const MarkdownBlockContext = createContext({
   closedFence: false,
   renderDiagrams: true,
   originalRaw: "",
+  messageId: "",
+  streaming: false,
+  sourceOffset: 0,
 });
 
 const MarkdownBaseDirContext = createContext("");
@@ -470,13 +473,13 @@ function PreBlock({
   children,
   ...rest
 }: ComponentProps<"pre"> & SourcePositionProps & { node?: unknown }) {
-  const { closedFence, renderDiagrams } = useContext(MarkdownBlockContext);
+  const { closedFence, renderDiagrams, messageId, streaming, sourceOffset } = useContext(MarkdownBlockContext);
   const info = extractCode(children);
   // Hooks stay unconditional: the fence language and closed-ness can flip
   // between streaming renders, so the lookup must run on every render.
   const blockEntry = useSlotEntryForKey(
     "blockRenderer",
-    closedFence ? blockRendererCandidate(info?.lang ?? "") : undefined,
+    blockRendererCandidate(info?.lang ?? ""),
   );
   if (!info) return <pre {...rest}>{children}</pre>;
   if (
@@ -486,13 +489,17 @@ function PreBlock({
   ) {
     return <MermaidBlock code={info.code} {...sourcePositionProps(rest)} />;
   }
-  if (blockEntry) {
+  if (blockEntry && (closedFence || blockEntry.streaming)) {
     return (
       <PluginBlockRenderer
         key={blockEntry.id}
         entry={blockEntry}
         language={info.lang}
         source={info.code}
+        messageId={messageId}
+        fenceId={String(rest["data-source-start"] ?? sourceOffset)}
+        closed={closedFence}
+        streaming={streaming}
         sourcePosition={sourcePositionProps(rest)}
         fallback={
           <CodeBlock code={info.code} lang={info.lang} {...sourcePositionProps(rest)} />
@@ -889,6 +896,8 @@ const Block = memo(function MarkdownBlock({
   raw,
   originalRaw,
   sourceOffset,
+  messageId,
+  streaming,
   renderDiagrams,
   workspaceRoot,
   baseDir,
@@ -896,6 +905,8 @@ const Block = memo(function MarkdownBlock({
   raw: string;
   originalRaw: string;
   sourceOffset: number;
+  messageId: string;
+  streaming: boolean;
   renderDiagrams: boolean;
   workspaceRoot?: string | null;
   baseDir?: string;
@@ -905,8 +916,11 @@ const Block = memo(function MarkdownBlock({
       closedFence: isClosedFencedCodeBlock(raw),
       renderDiagrams,
       originalRaw,
+      messageId,
+      streaming,
+      sourceOffset,
     }),
-    [raw, originalRaw, renderDiagrams],
+    [raw, originalRaw, renderDiagrams, messageId, streaming, sourceOffset],
   );
   const remarkPlugins = useMemo(
     () => [
@@ -955,8 +969,10 @@ export const Markdown = memo(function Markdown({
   renderDiagrams = true,
   baseDir,
   streaming = false,
+  messageId = "",
 }: {
   source: string;
+  messageId?: string;
   renderDiagrams?: boolean;
   /** True only while an assistant message is still receiving text. */
   streaming?: boolean;
@@ -1045,6 +1061,8 @@ export const Markdown = memo(function Markdown({
               raw={raw}
               originalRaw={originalRaw}
               sourceOffset={start}
+              messageId={messageId}
+              streaming={streaming}
               renderDiagrams={renderDiagrams}
               workspaceRoot={workspaceRoot}
               baseDir={baseDir}

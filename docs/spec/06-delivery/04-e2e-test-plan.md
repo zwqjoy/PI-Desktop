@@ -17473,3 +17473,27 @@ host-created files. The full app's file-preview viewer is covered separately.
 - **Steps:** Save a 500K user context limit for a model whose catalog publishes 1M. Open the Composer model list, then send a short message and inspect context usage. Repeat with a catalog-owned limit and with discovery unavailable.
 - **Expected:** The user-configured row and context inspector show 500K; a catalog-owned row follows the published limit; a configured model without discovery retains its saved context label. Model selection remains unchanged.
 - **Status:** Automated unit regression in `apps/desktop/test/composer-models.test.mjs` covers user overrides, catalog inheritance, and missing discovery; the full save → picker → message → context-inspector path remains a manual validation scenario.
+
+### E2E-GENUI-inline-stream-and-action
+
+- Preconditions: isolated Desktop profile from `dev/myupdate`; built and
+  granted `plugins/genui`; stub provider, no production credentials.
+- Steps: stream prose, a namespaced GenUI fence with two component boundaries,
+  then prose; complete it with a table, quiz and action; sort and grade
+  locally; click the action after switching the selected session; reopen the
+  original session; exercise Mermaid/ECharts/3D, export JSON/HTML; disable,
+  reload and render overflowing or invalid source.
+- Expected: completed nodes appear inline before the fence closes; local
+  interactions cause no model call; actions target the original session or
+  show admission failure; identical history restores secret-free state;
+  native engine assets resolve from the granted plugin generation; exports
+  retain state and used engines; unload/errors/overflow restore source.
+  Default plugins still wait for a closed fence and receive only two props.
+- Specs: `07-plugins/03-plugin-api`, `05-security/01-security`, ADR
+  `streaming-plugin-fences`. Milestone: GenUI parity.
+- Automated lower-level coverage: `test/plugin-block-renderer-slot.test.mjs`
+  and `plugins/genui/test/user-path.test.mjs`. Electron acceptance: pending.
+
+| Scenario | Contract | Coverage |
+| --- | --- | --- |
+| E2E-GENUI-inline-stream-and-action | Opt-in streaming, identity, action and recovery | Lower-level tests above; Electron pending |

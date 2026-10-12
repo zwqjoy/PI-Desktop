@@ -1384,3 +1384,19 @@ one at runtime.
 
 All high-risk entry points assert declared+granted permissions and emit audit log lines.
 Plugin panels no longer receive the full `pi` object; they use `window.pluginBridge.invoke`.
+
+## Streaming renderer blocks
+
+`blockRenderer` may opt in with `streaming: true`. The host publishes growing
+fence source at the original Markdown position, `closed` and `streaming`
+lifecycle flags, and transcript-owned `sessionId`, `messageId`, `fenceId`
+(source offset). Source changes and terminal lifecycle changes update the
+props. Default registrations preserve the closed-fence props-once contract
+and receive exactly `{ language, source }`. Namespaced ownership, source
+anchors, permission grants, unload fallback and the host height bound remain
+authoritative. Async overflow is observed for streaming mounts.
+
+The GenUI plugin sends explicit actions through its declared `plugin.call`
+method to the existing `desktop.control`-gated `agent/prompt` route with the
+original session ID. Failed admission is observable; the plugin must not
+silently retry or select another session. See ADR `streaming-plugin-fences`.

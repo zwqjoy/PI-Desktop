@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "local.pi-genui",
+  "name": "GenUI",
+  "version": "0.2.0",
+  "description": "Interactive GenUI components inside assistant replies, with streaming, charts, media, forms and actions.",
+  "main": "main.js",
+  "renderer": "runtime/renderer.mjs",
+  "rendererActions": ["plugin.call"],
+  "rendererCallMethods": ["action", "locale"],
+  "permissions": ["renderer.extension", "agent.tool.register", "agent.prompt.inject", "desktop.control"],
+  "contributes": {
+    "skills": ["skills/genui.md"],
+    "agentTools": [
+      {"name":"render_ui","description":"Render a validated GenUI spec inline in this tool result. Prefer a local.pi-genui:dsh-ui fence in the reply for streaming UI.","risk":"low","schema":{"type":"object","properties":{"spec":{}} ,"required":["spec"]}},
+      {"name":"validate_dsh_ui","description":"Validate and normalize a GenUI spec without rendering it.","risk":"low","schema":{"type":"object","properties":{"spec":{}} ,"required":["spec"]}}
+    ]
+  },
+  "engines": {"piDesktop": ">=0.18.0-beta.6"},
+  "activationEvents": ["onStartup"],
+  "license": "MIT"
+}
