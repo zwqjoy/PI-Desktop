@@ -17497,3 +17497,19 @@ host-created files. The full app's file-preview viewer is covered separately.
 | Scenario | Contract | Coverage |
 | --- | --- | --- |
 | E2E-GENUI-inline-stream-and-action | Opt-in streaming, identity, action and recovery | Lower-level tests above; Electron pending |
+
+### E2E-GENUI-automatic-jsx-activation
+
+- Preconditions: built GenUI plugin in an isolated profile, renderer grant.
+- Steps: activate the real compiled entry using the host import map; stream a
+  chart fence and exercise a control using the host React context.
+- Expected: `react/jsx-runtime` resolves without bundling another React;
+  registrations succeed and chart components replace the fence in place.
+- Regression: `plugin-renderer-import-map.test.mjs` verifies all shared module
+  bindings and renders an automatic JSX component with host hooks/context.
+- Native fixture: `node scripts/e2e-genui-renderer.mjs` loads the real compiled
+  GenUI entry with the production host import map in a hidden Electron window,
+  waits for Mermaid SVG and ECharts canvas/SVG, and clicks an original-session
+  action. No real provider or user profile is used.
+- Specs: `07-plugins/03-plugin-api`. The isolated renderer fixture passes;
+  full Desktop session/recovery acceptance remains separate.

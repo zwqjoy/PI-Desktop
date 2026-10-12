@@ -1400,3 +1400,8 @@ The GenUI plugin sends explicit actions through its declared `plugin.call`
 method to the existing `desktop.control`-gated `agent/prompt` route with the
 original session ID. Failed admission is observable; the plugin must not
 silently retry or select another session. See ADR `streaming-plugin-fences`.
+
+Renderer ES modules may import `react/jsx-runtime` for automatic JSX. The host
+import map exposes its own runtime alongside `react`, `react-dom`, and
+`react-dom/client`, before evaluating plugin entries. This keeps compiled JSX,
+hooks and context on the host React instance.

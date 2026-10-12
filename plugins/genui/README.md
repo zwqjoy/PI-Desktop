@@ -14,6 +14,11 @@ npm run build
 npm test
 ```
 
+From the repository root, run `node scripts/e2e-genui-renderer.mjs` for a
+hidden Electron renderer smoke using the real plugin bundle, shared React
+import map and local chart engines. It uses a temporary profile and no model
+credentials.
+
 Dependencies are needed to build this new plugin; they are not an Electron
 test environment. React is external in the distribution renderer: the host
 supplies its own React through its import map. Chart engines are copied from
@@ -63,7 +68,7 @@ This is the first implementation stage, not a completed parity claim.
 | Area | Status |
 | --- | --- |
 | Inline placement and streaming contract | Implemented; host integration tests pass |
-| Native renderer and bundled chart engines | Built; live Electron engine acceptance pending |
+| Native renderer and bundled chart engines | Isolated Electron activation/Mermaid/ECharts fixture passes; full Desktop acceptance pending |
 | Table sort and original-session action path | Component user-path test passes |
 | Reopen state, native downloads, disable/reload and overflow | Desktop acceptance pending |
 | Persistent session dock and append/replace workflow | Pending PI-Desktop adaptation |
