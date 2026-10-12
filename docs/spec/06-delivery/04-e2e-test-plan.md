@@ -17007,3 +17007,26 @@ host-created files. The full app's file-preview viewer is covered separately.
   Playwright can be supplied through `PI_TEST_PLAYWRIGHT`). Only the model server
   is simulated in the Electron flow. The fixture profile and screenshots stay
   under `.artifacts/` for inspection; no user profile or paid model is used.
+
+### E2E-WORKSPACE-HUB
+
+- Preconditions: current task worktree, built shared/i18n/runtime packages and
+  debug Host; host Electron dependency reused; isolated temporary profile.
+- Steps: navigate to the dashboard, add a work item, complete it; navigate to the
+  library, import Markdown, save a draft, publish, associate a project/category,
+  search the published text, inspect the original revision, remount both pages,
+  prepare business-template and document-snapshot tasks through real session creation.
+- Expected: actual progress changes, immutable original survives publication,
+  project/category and published text survive remount, binary input never executes.
+- Specs: [Workspace hub](../04-ux/13-workspace-hub.md),
+  [Data storage](../03-runtime/04-data-storage.md),
+  [IPC](../03-runtime/01-ipc-protocol.md).
+- Milestone: native project/dashboard library extension.
+- Automated acceptance: `node --test apps/desktop/test/workspace-hub-user-path.test.mjs`;
+  production components + real preload/IPC/Host, no real provider or user instance.
+  Restart/conflict/invalid-input coverage: `cargo test -p host-core --locked workspace_hub`.
+- Not covered: real model response, Office extraction, packaged installer.
+
+| Scenario | Contract | Coverage |
+| --- | --- | --- |
+| E2E-WORKSPACE-HUB | Project planning, immutable document revisions, native Host persistence | Isolated Electron user path and Host regressions above |

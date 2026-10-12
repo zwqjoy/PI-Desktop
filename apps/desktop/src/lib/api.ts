@@ -1,3 +1,4 @@
+import type { WorkspaceHubCommand, WorkspaceHubSnapshot } from "@pi-desktop/shared";
 import { projectPlanHistory } from "./plan-history";
 import type {
   ScheduledTaskRun,
@@ -830,6 +831,9 @@ export const api = {
     invoke<{ workspace: ProjectWorkspace | null }>(IPC.invoke.projectGet),
   listProjects: () =>
     invoke<{ projects: ProjectRecord[] }>(IPC.invoke.projectList),
+  readWorkspaceHub: () => invoke<WorkspaceHubSnapshot>(IPC.invoke.workspaceHubRead),
+  changeWorkspaceHub: (expectedRevision: number, command: WorkspaceHubCommand) =>
+    invoke<WorkspaceHubSnapshot>(IPC.invoke.workspaceHubChange, { expectedRevision, command }),
   listProjectGroups: () =>
     invoke<{ groups: ProjectGroupRecord[] }>(IPC.invoke.projectGroupList),
   createProjectGroup: (name: string, folders: string[]) =>

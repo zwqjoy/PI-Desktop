@@ -174,6 +174,8 @@ export const IPC = {
     projectPickFolders: "pi-desktop/project/pickFolders",
     projectMemoryGet: "pi-desktop/project/memory/get",
     projectMemorySave: "pi-desktop/project/memory/save",
+    workspaceHubRead: "pi-desktop/workspace-hub/read",
+    workspaceHubChange: "pi-desktop/workspace-hub/change",
     projectGroupList: "pi-desktop/project-group/list",
     projectGroupCreate: "pi-desktop/project-group/create",
     projectGroupRename: "pi-desktop/project-group/rename",

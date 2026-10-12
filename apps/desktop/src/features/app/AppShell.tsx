@@ -23,6 +23,16 @@ import { LiveVoiceStatusHost } from "../voice/live/LiveVoiceStatusHost";
 import { CollapsedTitlebarActions, RoutePending } from "./chrome";
 import { useAppShellRuntime } from "./useAppShellRuntime";
 
+const ProjectDashboard = lazy(() =>
+  import("../workspace-hub/ProjectDashboard").then((module) => ({
+    default: module.ProjectDashboard,
+  })),
+);
+const DocumentLibrary = lazy(() =>
+  import("../workspace-hub/DocumentLibrary").then((module) => ({
+    default: module.DocumentLibrary,
+  })),
+);
 const SettingsPage = lazy(() =>
   import("../../pages/SettingsPage").then((module) => ({
     default: module.SettingsPage,
@@ -272,7 +282,15 @@ export function AppShell() {
                 )}
 
                 <Suspense fallback={<RoutePending />}>
-                  {page === "scheduled" ? (
+                  {page === "dashboard" ? (
+                    <div className="route-surface route-page">
+                      <ProjectDashboard />
+                    </div>
+                  ) : page === "library" ? (
+                    <div className="route-surface route-page">
+                      <DocumentLibrary />
+                    </div>
+                  ) : page === "scheduled" ? (
                     <div className="route-surface route-page">
                       <ScheduledPage />
                     </div>

@@ -1,3 +1,5 @@
+import { WorkspaceHubNav } from "../features/workspace-hub/WorkspaceHubNav";
+import "../features/workspace-hub/workspace-hub.css";
 import { IconClock } from "./icons";
 import {
   useCallback,
@@ -2359,6 +2361,7 @@ export function Sidebar({
       </div>
 
       <div className="sidebar-body no-drag">
+        <WorkspaceHubNav />
 
         {pinnedSessions.length > 0 ? (
           <section

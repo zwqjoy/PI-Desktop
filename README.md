@@ -763,3 +763,9 @@ See [LICENSE](LICENSE) for details.
 <sub>Local-first · Model-agnostic · Plugin-powered</sub>
 
 </div>
+
+### Native workspace organization
+
+Use the sidebar Project dashboard and Document library to track work items,
+organize originals and text revisions, and prepare tasks with business templates.
+See the [workspace guide](docs/guide/workspace-hub.md) for usage and current limits.

@@ -240,3 +240,11 @@ relevant decision record before changing the contract.
 > D623 / ADR 0064 amends the inline automatic compaction trigger to 90% of
 > the derived hard budget. The hard limit remains the final provider-request
 > guard; no background compaction or storage/protocol change is introduced.
+
+## Native workspace hub amendment (2026-10-12)
+
+[Native workspace hub ADR](../adr/workspace-hub-native-projects-library.md) adds
+Project dashboard and Document library destinations over existing logical groups.
+[Workspace hub spec](04-ux/13-workspace-hub.md) defines versioned Host-owned
+planning/metadata, immutable document files and reviewable task draft snapshots.
+Existing project archive, session, tool, schema and handshake contracts remain.

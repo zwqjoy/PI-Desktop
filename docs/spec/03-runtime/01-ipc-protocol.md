@@ -2496,3 +2496,15 @@ window, and the owner's own failure code arrives through the main window, which
 is the frame that ran the action. A widget action never changes call state by
 itself: it is forwarded to the owner frame, and the resulting state reaches the
 widget through the same authoritative view the owner receives.
+
+## Workspace hub
+
+- `pi-desktop/workspace-hub/read` → `workspaceHub.read`: versioned typed snapshot.
+- `pi-desktop/workspace-hub/change` → `workspaceHub.change`:
+  `{ expectedRevision, command }`, where `command` is the closed
+  `WorkspaceHubCommand` union in `packages/shared/src/workspace-hub.ts`.
+- Mutations return the next snapshot. Stale writes return `CONFLICT`, invalid
+  commands/project IDs `INVALID_PARAMS`, quota violations `LIMIT_EXCEEDED`, and
+  unexpected storage failures `INTERNAL`. Existing preload sender/allowlist and
+  Host handshake/shutdown checks apply. No arbitrary methods or filesystem paths
+  are accepted. Existing IPC contracts and handshake version remain unchanged.

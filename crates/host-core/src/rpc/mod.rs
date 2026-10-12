@@ -1763,6 +1763,22 @@ async fn handle_request(
     }
 
     match method {
+        method if method.starts_with("workspaceHub.") => {
+            let st = state.lock().await;
+            crate::workspace_hub::handle(&st.db, method, params).map_err(|error| {
+                let message = error.to_string();
+                let code = if message.starts_with("CONFLICT:") {
+                    "CONFLICT"
+                } else if message.starts_with("LIMIT_EXCEEDED:") {
+                    "LIMIT_EXCEEDED"
+                } else if message.starts_with("INVALID_PARAMS:") {
+                    "INVALID_PARAMS"
+                } else {
+                    "INTERNAL"
+                };
+                rpc_err(1002, message, code)
+            })
+        }
         method if method.starts_with("session.collaboration.") => {
             let st = state.lock().await;
             crate::session_collaboration::handle(&st.db, method, &params)

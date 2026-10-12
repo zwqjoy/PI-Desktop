@@ -1,6 +1,8 @@
 import { en, type EnglishCatalog } from "../en/index.js";
 
 export const zhTW = {
+  workspaceHub: en.workspaceHub,
+
   app: {
     shellName: "PI-Desktop",
     tagline: "本地 AI 程式設計助手",

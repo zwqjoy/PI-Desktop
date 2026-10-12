@@ -1,6 +1,8 @@
 import { en, type EnglishCatalog } from "../en/index.js";
 
 export const es = {
+  workspaceHub: en.workspaceHub,
+
   "app": {
     "shellName": "PI-Desktop",
     "tagline": "Socio de codificación de IA local",

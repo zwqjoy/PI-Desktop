@@ -33,6 +33,7 @@ mod turn_queue;
 mod user_skills;
 mod user_subagents;
 mod workspace;
+mod workspace_hub;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;

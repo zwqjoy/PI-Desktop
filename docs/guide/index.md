@@ -14,6 +14,7 @@ inspectable while still making everyday coding work feel direct.
 | If you want to… | Start with |
 |---|---|
 | See what the app looks like | [Screens](/guide/screenshots) |
+| Organize project work and document revisions | [Projects and documents](/guide/workspace-hub) |
 | Run recurring local tasks | [Scheduled tasks](/guide/automations) |
 | Add an MCP catalog and its key | [MCP market](/guide/mcp-market) |
 | Understand what is shipped | [Product scope](/spec/01-product/01-product-scope) |

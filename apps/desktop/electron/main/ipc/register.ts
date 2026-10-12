@@ -1,3 +1,4 @@
+import { registerWorkspaceHubIpc } from "./workspace-hub-ipc";
 import { join } from "node:path";
 import { dialog, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from "electron";
 import { err, ErrorCodes, IPC, ok, type Result } from "@pi-desktop/shared";
@@ -336,6 +337,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
       return handler(...args);
     },
   });
+  registerWorkspaceHubIpc(registrar, getHost);
   registerWorkspaceIpc({
     registrar,
     getMainWindow,

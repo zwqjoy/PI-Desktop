@@ -1781,3 +1781,13 @@ An unknown price is distinct from a known zero price; partial known costs remain
 on the individual operations. Late usage targets its captured turn and does not
 revive it or debit the currently active turn. Immediate nested parent and owning
 Task remain separate optional transcript/event fields.
+
+## Workspace hub extension
+
+The `workspaceHub/v1` kv entry is an additive versioned metadata index for native
+project planning and library records. File bytes live under relative
+`library/<UUID>/<payload UUID>.bin` paths, saved drafts under `draft-<index revision>.txt`.
+They are flushed before index publication and preserve originals across updates.
+No schema version change or migration of existing projects is needed. Removal
+hides metadata; retained payloads remain part of profile backup/migration.
+See [workspace hub](../04-ux/13-workspace-hub.md) for limits and concurrency.
