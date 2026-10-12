@@ -1401,6 +1401,16 @@ method to the existing `desktop.control`-gated `agent/prompt` route with the
 original session ID. Failed admission is observable; the plugin must not
 silently retry or select another session. See ADR `streaming-plugin-fences`.
 
+For GenUI inline fences, an upstream repair-drop-only diagnostic must not
+remove healthy siblings when streaming completes. Revalidate the surviving
+tree before rendering it and retain the original diagnostics in code details.
+An empty surviving tree, other validation failures, or secret collection
+remain errors. Tool admission continues to require a valid complete spec.
+GenUI tool schemas declare `spec` as an object. Legacy encoded JSON strings
+remain accepted at execution; syntax failures return `ok: false` with an
+invalid-JSON diagnostic, without echoing submitted content. Secret checks
+apply to parsed and normalized input before tool results are returned.
+
 Renderer ES modules may import `react/jsx-runtime` for automatic JSX. The host
 import map exposes its own runtime alongside `react`, `react-dom`, and
 `react-dom/client`, before evaluating plugin entries. This keeps compiled JSX,

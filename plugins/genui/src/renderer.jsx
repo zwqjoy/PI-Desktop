@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { GenuiActionContext, ErrorBoundary, setGenuiAssetBase } from "@changfenhuang/dsh-genui/embed";
 import { ExportableGenuiBlock } from "@upstream/artifact/ExportableGenuiBlock.tsx";
 import { parsePartialGenuiSpec } from "@upstream/parse-partial.ts";
-import { processGenuiSpec, partialRepairGenuiSpec } from "@upstream/guard.ts";
+import { processGenuiSpec, partialRepairGenuiSpec, isRenderableProcess } from "@upstream/guard.ts";
 import { fenceStateKey } from "@upstream/interaction-store.ts";
 import { setLocale, t } from "@upstream/i18n/runtime.ts";
 import { assertNoSecrets } from "./policy.js";
@@ -18,7 +18,17 @@ function resolveSource(source) {
     if (!parsed) return { spec: null };
     assertNoSecrets(parsed);
     const processed = processGenuiSpec(parsed);
-    return { spec: partialRepairGenuiSpec(processed), errors: processed.errors };
+    assertNoSecrets(processed.value);
+    let spec = partialRepairGenuiSpec(processed);
+    // The upstream repair can discard an unusable chart without a node-path
+    // diagnostic. Revalidate its surviving tree before exposing any siblings.
+    if (!spec && processed.spec && processed.errors.length > 0
+      && processed.errors.every(error => error.startsWith("repair dropped "))) {
+      const surviving = processGenuiSpec(processed.spec);
+      assertNoSecrets(surviving.value);
+      if (isRenderableProcess(surviving) && surviving.renderedNativeCount > 0) spec = surviving.spec;
+    }
+    return { spec, errors: processed.errors };
   } catch (error) {
     return { error: error.message };
   }
@@ -50,7 +60,7 @@ function Block({ source, sessionId, messageId, fenceId, closed = true, streaming
       {result.spec ? <GenuiActionContext.Provider value={onAction}>
         <ExportableGenuiBlock spec={result.spec} stateKey={stateKey} animateEntrance={streaming} exportEnabled={closed && !streaming} />
       </GenuiActionContext.Provider> : <>
-        {closed && <div role="alert">{result.error || copy("error")}</div>}
+        {closed && <div role="alert">{result.error || result.errors?.join("\n") || copy("error")}</div>}
         {closed && <pre>{source}</pre>}
       </>}
       {closed && result.spec && result.errors?.length > 0 && <details><summary>{t("label.code")}</summary><pre>{result.errors.join("\n")}\n{source}</pre></details>}

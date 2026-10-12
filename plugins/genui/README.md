@@ -4,6 +4,14 @@ This development plugin reuses the pinned `@changfenhuang/dsh-genui` 0.11.4
 renderer instead of the incomplete panel-only port. The plugin is maintained
 alongside the opt-in streaming fence contract on `dev/myupdate`.
 
+Inline fences retain validated siblings when upstream repair drops an
+unusable component (for example, a Sankey with links but no node data).
+The surviving tree is revalidated; original diagnostics remain visible in
+the code details. Entirely unusable or secret-collecting specs still fail.
+Tool validation remains strict so agents can correct incomplete charts.
+Tool schemas request a spec object. Legacy JSON strings are parsed at entry;
+malformed strings return a syntax diagnostic rather than a root-type error.
+
 ## Develop and install
 
 From this directory:

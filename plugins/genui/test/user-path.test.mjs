@@ -59,7 +59,11 @@ test("partial reply → complete table → local sort → action targets origina
   ] };
   const tool = await tools.get("render_ui").execute({ spec });
   assert.equal(JSON.parse(tool.content[0].text).ok, true);
+  // A links-only Sankey is schema-valid but cannot be repaired into a chart.
+  spec.items.push({ type: "echart", preset: "sankey", links: [{ source: "A", target: "B", value: 1 }] });
   await act(() => root.render(React.createElement(block.component, { ...identity, source: JSON.stringify(spec), streaming: false, closed: true })));
+  assert.match(document.body.textContent, /Revenue/);
+  assert.match(document.body.textContent, /repair dropped 1/);
   assert.equal(document.querySelectorAll("tbody tr").length, 2);
   const numericHeader = [...document.querySelectorAll("th")].find(el => el.textContent.includes("Value"));
   await act(() => numericHeader.querySelector("button").click());
@@ -87,6 +91,14 @@ test("validation keeps all native families and rejects secret collection", () =>
   }
   assert.throws(() => plugin.validate({ items: [{ type: "input", inputType: "password", placeholder: "Password" }] }), /must not collect/);
   assert.equal(resolveSource('{"items":[{"type":"input","inputType":"password"}]}').spec, undefined);
+  const unusable = { type: "echart", preset: "sankey", links: [{ source: "A", target: "B", value: 1 }] };
+  assert.equal(resolveSource(JSON.stringify({ items: [unusable] })).spec, null);
+  const unsafe = resolveSource(JSON.stringify({ items: [
+    { type: "stat", label: "Visible", value: "1" },
+    { type: "input", inputType: "password" },
+  ] }));
+  assert.equal(unsafe.spec, undefined);
+  assert.match(unsafe.error, /must not collect/);
 });
 
 test("bad or failed action admission stays observable and has no implicit retry", async (t) => {
@@ -96,4 +108,26 @@ test("bad or failed action admission stays observable and has no implicit retry"
   await assert.rejects(plugin.onRendererCall("action", { action: "refresh", payload: {} }), /Invalid/);
   await assert.rejects(plugin.onRendererCall("action", { sessionId: "s", messageId: "m", action: "refresh", payload: {} }), /AGENT_BUSY/);
   assert.equal(calls, 1);
+});
+
+test("tool validation diagnoses malformed JSON and accepts a corrected object", async (t) => {
+  const tools = new Map();
+  globalThis.pi = { agent: { registerTool: async tool => tools.set(tool.name, tool) } };
+  t.after(() => { delete globalThis.pi; });
+  await plugin.onLoad();
+  const validator = tools.get("validate_dsh_ui");
+  assert.equal(validator.schema.properties.spec.type, "object");
+  const decode = result => JSON.parse(result.content[0].text);
+  const bad = decode(await validator.execute({ spec: '{"items":[{"type":"stat",}]}' }));
+  assert.equal(bad.ok, false);
+  assert.match(bad.errors.join(" "), /invalid JSON/);
+  const spec = { items: [{ type: "stat", label: "Recovered", value: "42" }] };
+  assert.equal(decode(await validator.execute({ spec })).ok, true);
+  const rendered = decode(await tools.get("render_ui").execute({ spec }));
+  assert.equal(rendered.spec.items[0].label, "Recovered");
+  assert.equal(decode(await validator.execute({ spec: JSON.stringify(spec) })).ok, true);
+  assert.throws(() => tools.get("render_ui").execute({ spec: '{"items":[' }), /invalid JSON/);
+  assert.throws(() => validator.execute({ spec: JSON.stringify({ items: [
+    { type: "input", inputType: "password" },
+  ] }) }), /must not collect/);
 });

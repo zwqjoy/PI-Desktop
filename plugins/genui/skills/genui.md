@@ -15,6 +15,10 @@ Root example: {"title":"Orders","items":[{"type":"stat","label":"Total","value":
 Use the native schema below. Do not invent HTML, JavaScript or callback code.
 Call validate_dsh_ui when unsure of a field. render_ui is an optional inline
 TOOL channel; a fence is the main response channel.
+For either tool, pass spec as a JSON object, never an encoded JSON string:
+{"spec":{"items":[{"type":"stat","label":"Total","value":"42"}]}}.
+Correct reported validation errors before rendering. Do not write files or
+run shell commands merely to construct or validate a GenUI spec.
 
 Local controls sort, filter, expand, adjust plots and grade quizzes without a
 model round trip. A component carrying action sends its event to the original

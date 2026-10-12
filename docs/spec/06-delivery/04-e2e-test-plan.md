@@ -17489,6 +17489,16 @@ host-created files. The full app's file-preview viewer is covered separately.
   native engine assets resolve from the granted plugin generation; exports
   retain state and used engines; unload/errors/overflow restore source.
   Default plugins still wait for a closed fence and receive only two props.
+- Completion regression: append a links-only Sankey after a valid streamed
+  statistic, table and button. Complete the fence; healthy siblings remain,
+  the dropped-node diagnostic is visible in details, local sorting and the
+  original-session action still work. An entirely unusable chart or password
+  control must not be admitted. Covered by the GenUI user-path test below.
+- Tool-input regression: call validation with a malformed encoded spec,
+  correct it to an object, then call render. Expect an invalid-JSON diagnostic
+  followed by successful validation and rendering; legacy valid strings
+  remain supported and encoded password controls remain rejected. Covered by
+  `plugins/genui/test/user-path.test.mjs`.
 - Specs: `07-plugins/03-plugin-api`, `05-security/01-security`, ADR
   `streaming-plugin-fences`. Milestone: GenUI parity.
 - Automated lower-level coverage: `test/plugin-block-renderer-slot.test.mjs`

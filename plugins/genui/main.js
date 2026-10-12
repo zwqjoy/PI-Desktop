@@ -8,8 +8,20 @@ function validate(input) {
   if (typeof text !== "string" || Buffer.byteLength(text, "utf8") > MAX_SOURCE_BYTES) {
     throw new Error("GenUI spec is missing or too large");
   }
+  // Keep legacy encoded specs usable, but never turn syntax errors into
+  // misleading root-schema diagnostics or echo submitted secret values.
+  if (typeof input === "string") {
+    try { input = JSON.parse(input); }
+    catch (error) {
+      const position = error.message.match(/position (\d+)/)?.[1];
+      return { ok: false, spec: null, errors: [
+        `GenUI spec contains invalid JSON${position ? ` at position ${position}` : ""}. Pass spec as an object, not a JSON string.`,
+      ], warnings: [], renderedCount: 0 };
+    }
+  }
   assertNoSecrets(input);
   const result = processGenuiSpec(input);
+  assertNoSecrets(result.value);
   assertNoSecrets(result.spec);
   return { ok: isRenderableProcess(result), spec: result.spec, errors: result.errors, warnings: result.warnings, renderedCount: result.renderedCount };
 }
@@ -24,7 +36,11 @@ async function onLoad() {
       name,
       description: name === "render_ui" ? "Render a validated GenUI spec inline." : "Validate a GenUI spec.",
       risk: "low",
-      schema: { type: "object", properties: { spec: {} }, required: ["spec"] },
+      schema: {
+        type: "object",
+        properties: { spec: { type: "object", description: "GenUI spec object with an items array. Do not JSON.stringify or pass a string." } },
+        required: ["spec"],
+      },
       execute(args) {
         const result = validate(args?.spec);
         if (name === "render_ui" && !result.ok) throw new Error(result.errors.join("; "));
