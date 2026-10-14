@@ -2379,6 +2379,71 @@ describe("DesktopAgentRuntime deferred tool catalog", () => {
     await runtime.dispose();
   });
 
+  it("rejects asktool questions over 300 Unicode characters before opening a card", async () => {
+    const onEvent = vi.fn();
+    const runtime = createRuntime({ onEvent });
+    type AskToolTestTool = {
+      name: string;
+      parameters: {
+        properties: {
+          questions: {
+            items: { properties: { question: { maxLength?: number } } };
+          };
+        };
+      };
+      execute: (toolCallId: string, params: unknown) => Promise<unknown>;
+    };
+    const tools = (runtime as unknown as {
+      agent: { state: { tools: AskToolTestTool[] } };
+    }).agent.state.tools;
+    const askTool = tools.find((tool) => tool.name === "asktool");
+    if (!askTool) throw new Error("asktool is missing from the runtime");
+    const questionSchema = askTool.parameters.properties.questions.items.properties.question;
+    expect(questionSchema.maxLength).toBe(300);
+
+    const result = await askTool.execute("ask-call-too-long", {
+      questions: [{ question: "q".repeat(301), options: ["Continue"] }],
+    });
+
+    expect(result).toMatchObject({
+      isError: true,
+      details: { errorCode: "ASKTOOL_INVALID_ARGUMENT" },
+    });
+    const askRequests = () =>
+      onEvent.mock.calls
+        .map(([envelope]) =>
+          (envelope as {
+            event: {
+              type: string;
+              request?: { requestId: string; questions: Array<{ question: string }> };
+            };
+          }).event,
+        )
+        .filter((event) => event.type === "asktool_request");
+    expect(askRequests()).toHaveLength(0);
+
+    const validQuestion = "🧭".repeat(300);
+    const pendingAtLimit = askTool.execute("ask-call-at-limit", {
+      questions: [{ question: validQuestion, options: ["Continue"] }],
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const request = askRequests()[0]?.request;
+    if (!request) throw new Error("valid asktool question did not open a card");
+    expect(request.questions[0].question).toBe(validQuestion);
+    expect(
+      runtime.resolveAskTool({
+        requestId: request.requestId,
+        sessionId: "session-1",
+        answers: [["Continue"]],
+      }),
+    ).toEqual({ ok: true });
+    await expect(pendingAtLimit).resolves.toMatchObject({
+      content: [{ text: `${validQuestion}：Continue` }],
+      details: { answers: [["Continue"]] },
+    });
+    await runtime.dispose();
+  });
+
   it("normalizes legacy chat onto the Plan core", async () => {
     const runtime = createRuntime({
       mode: "chat",
@@ -5719,6 +5784,101 @@ describe("DesktopAgentRuntime response duration", () => {
     await runtime.dispose();
   });
 
+  it("persists request wait separately from streamed thinking and answer time", async () => {
+    vi.useFakeTimers();
+    try {
+      const start = Date.parse("2026-10-01T00:00:00.000Z");
+      vi.setSystemTime(start + 1_000);
+      const onEvent = vi.fn();
+      const runtime = createRuntime({ onEvent });
+      const internals = runtime as unknown as {
+        handleAgentEvent(event: unknown): Promise<void>;
+        requestStartedAt: number | undefined;
+      };
+      internals.requestStartedAt = start;
+
+      await internals.handleAgentEvent({
+        type: "message_start",
+        message: { role: "assistant", content: [] },
+      });
+      await vi.advanceTimersByTimeAsync(2_500);
+      await internals.handleAgentEvent({
+        type: "message_end",
+        message: assistantMessage({
+          content: [
+            { type: "thinking", thinking: "reasoning" },
+            { type: "text", text: "answer" },
+          ],
+        }),
+      });
+
+      const events = onEvent.mock.calls.map(([envelope]) => envelope as any);
+      expect(events.find(({ event }) => event.type === "message_start")?.event.message)
+        .toMatchObject({ providerWaitMs: 1_000 });
+      expect(events.find(({ event }) => event.type === "message_end")?.event.message)
+        .toMatchObject({
+          providerWaitMs: 1_000,
+          modelStreamDurationMs: 2_500,
+        });
+      await runtime.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("accumulates request and stream timing across a provider retry", async () => {
+    vi.useFakeTimers();
+    try {
+      const start = Date.parse("2026-10-01T00:00:00.000Z");
+      vi.setSystemTime(start + 2_000);
+      const onEvent = vi.fn();
+      const runtime = createRuntime({ onEvent });
+      const internals = runtime as unknown as {
+        handleAgentEvent(event: unknown): Promise<void>;
+        requestStartedAt: number | undefined;
+        currentAssistant: unknown;
+        providerRetryInProgress: boolean;
+      };
+      internals.requestStartedAt = start + 1_000;
+      internals.providerRetryInProgress = true;
+      internals.currentAssistant = {
+        id: "assistant-retry",
+        role: "assistant",
+        content: "partial attempt",
+        createdAt: new Date(start).toISOString(),
+        status: "streaming",
+        modelId: "local-model",
+        providerId: "local",
+        providerWaitMs: 1_000,
+        modelStreamDurationMs: 500,
+      };
+
+      await internals.handleAgentEvent({
+        type: "message_start",
+        message: { role: "assistant", content: [] },
+      });
+      await vi.advanceTimersByTimeAsync(2_500);
+      await internals.handleAgentEvent({
+        type: "message_end",
+        message: assistantMessage({
+          content: [{ type: "text", text: "recovered answer" }],
+        }),
+      });
+
+      const terminal = onEvent.mock.calls
+        .map(([envelope]) => envelope as any)
+        .find(({ event }) => event.type === "message_end");
+      expect(terminal?.event.message).toMatchObject({
+        id: "assistant-retry",
+        providerWaitMs: 2_000,
+        modelStreamDurationMs: 3_000,
+      });
+      await runtime.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each(fallbackDurations)(
     "falls back to the sidecar stopwatch for a $label Pi duration",
     async ({ durationMs }) => {
@@ -6986,11 +7146,20 @@ describe("DesktopAgentRuntime per-turn context protection", () => {
     const agent = (runtime as any).agent;
     agent.prompt = vi.fn();
     vi.spyOn(runtime as any, "automaticCompactionNeeded").mockReturnValue(true);
+    let releaseCheckpoint!: () => void;
+    let checkpointStarted!: () => void;
+    const checkpointGate = new Promise<void>((resolve) => {
+      releaseCheckpoint = resolve;
+    });
+    const checkpointReady = new Promise<void>((resolve) => {
+      checkpointStarted = resolve;
+    });
     // The summary request is in flight when the user presses Stop.
     vi.spyOn(runtime as any, "buildCheckpoint").mockImplementation(
       async (...args: unknown[]) => {
         const signal = args[0] as AbortSignal;
-        await runtime.abort();
+        checkpointStarted();
+        await checkpointGate;
         return {
           ok: false,
           entries: [],
@@ -7001,9 +7170,14 @@ describe("DesktopAgentRuntime per-turn context protection", () => {
       },
     );
 
-    await expect(runtime.prompt("stopped request", "user-stopped")).rejects.toMatchObject({
+    const prompt = runtime.prompt("stopped request", "user-stopped");
+    await checkpointReady;
+    const abort = runtime.abort();
+    releaseCheckpoint();
+    await expect(prompt).rejects.toMatchObject({
       name: "AbortError",
     });
+    await abort;
 
     expect(agent.prompt).not.toHaveBeenCalled();
     expect((runtime as any).fullEntries).toEqual([
@@ -7028,6 +7202,59 @@ describe("DesktopAgentRuntime per-turn context protection", () => {
       ),
     ).toBe(false);
     expect(runtime.getStatus().isRunning).toBe(false);
+    await runtime.dispose();
+  });
+
+  it("waits for the aborted prompt to settle before accepting a follow-up", async () => {
+    const runtime = createRuntime();
+    const testRuntime = runtime as unknown as {
+      agent: {
+        prompt: () => Promise<void>;
+        abort: () => void;
+      };
+      handleAgentEvent: (event: { type: "agent_end" }) => Promise<void>;
+    };
+    const agent = testRuntime.agent;
+    let rejectFirstPrompt!: (error: Error) => void;
+    let firstPromptStarted!: () => void;
+    const firstPromptGate = new Promise<void>((_resolve, reject) => {
+      rejectFirstPrompt = reject;
+    });
+    const firstPromptReady = new Promise<void>((resolve) => {
+      firstPromptStarted = resolve;
+    });
+    let promptCount = 0;
+    agent.prompt = vi.fn(async () => {
+      promptCount += 1;
+      if (promptCount === 1) {
+        firstPromptStarted();
+        await firstPromptGate;
+        return;
+      }
+      await testRuntime.handleAgentEvent({ type: "agent_end" });
+    });
+    agent.abort = vi.fn();
+
+    const firstPrompt = runtime.prompt("first task", "user-first", "turn-first");
+    await firstPromptReady;
+    let abortSettled = false;
+    const abort = runtime.abort().then(() => {
+      abortSettled = true;
+    });
+    await Promise.resolve();
+    expect(abortSettled).toBe(false);
+
+    rejectFirstPrompt(Object.assign(new Error("The operation was aborted"), {
+      name: "AbortError",
+    }));
+    await expect(firstPrompt).rejects.toMatchObject({ name: "AbortError" });
+    await abort;
+    expect(abortSettled).toBe(true);
+
+    await expect(runtime.prompt("continue", "user-next", "turn-next")).resolves.toEqual({
+      turnId: "turn-next",
+    });
+    expect(agent.prompt).toHaveBeenCalledTimes(2);
     await runtime.dispose();
   });
 
@@ -8101,6 +8328,70 @@ describe("DesktopAgentRuntime subagents", () => {
       }
     },
   );
+
+  it.each(["during", "before"] as const)("handles steering %s TaskWait while its delegate continues running", async (timing) => {
+    subagentRuns.calls.length = 0;
+    subagentRuns.instances.length = 0;
+    subagentRuns.deferred = true;
+    subagentRuns.result = undefined;
+    let waiting!: () => void;
+    const beganWaiting = new Promise<void>((resolve) => { waiting = resolve; });
+    const runtime = createRuntime({ subagents: [explorer], onEvent: (value) => {
+      const envelope = value as AgentEventEnvelope;
+      if (envelope.event.type === "status" && envelope.event.status.activity?.phase === "waiting-subagents") waiting();
+    } });
+    const correct = () => runtime.steer({ text: "Correct the plan now." }, "active-turn", {
+      id: "correction-user", role: "user", content: "Correct the plan now.",
+      createdAt: "2026-10-13T00:00:00.000Z", steering: true,
+    });
+    const requests: AgentMessage[][] = [];
+    const internals = runtime as unknown as {
+      models: { streamSimple: (model: unknown, context: { messages: AgentMessage[] }) => ReturnType<typeof createAssistantMessageEventStream> };
+    };
+    internals.models = { streamSimple: (_model, context) => {
+      requests.push([...context.messages]);
+      const round = requests.length;
+      const message = assistantMessage({
+        content: round === 1
+          ? [{ type: "toolCall", id: "delegate", name: "Task", arguments: { agent: "explorer", task: "Inspect the fixture." } }]
+          : round === 2
+            ? [{ type: "toolCall", id: "wait", name: "TaskWait", arguments: {} }]
+            : [{ type: "text", text: "I have adjusted the plan." }],
+        stopReason: round <= 2 ? "toolUse" : "stop",
+      }) as unknown as AssistantMessage;
+      const stream = createAssistantMessageEventStream();
+      queueMicrotask(() => {
+        if (round === 2 && timing === "before") correct();
+        stream.push({ type: "start", partial: message });
+        stream.push({ type: "done", reason: round <= 2 ? "toolUse" : "stop", message });
+        stream.end(message);
+      });
+      return stream;
+    } };
+    const running = runtime.prompt("Start the inspection.", "initial-user", "active-turn");
+    try {
+      await beganWaiting;
+      if (timing === "during") {
+        expect(requests).toHaveLength(2);
+        correct();
+      }
+      await vi.waitFor(() => expect(requests.length).toBeGreaterThanOrEqual(3));
+      expect(JSON.stringify(requests[2])).toContain("Correct the plan now.");
+      expect(JSON.stringify(requests[2])).toContain("Interrupted by new user input");
+      const delegate = subagentRuns.calls[0] as { signal: AbortSignal };
+      expect(delegate.signal.aborted).toBe(false);
+      expect(runtime.getStatus().currentTurnId).toBe("active-turn");
+      expect(runtime.getStatus().isRunning).toBe(true);
+      subagentRuns.resolveRun?.({ agentName: "explorer", status: "completed", report: "Fixture inspected.", turns: 1, toolCalls: 0 });
+      await running;
+      expect(JSON.stringify(requests.at(-1))).toContain("Fixture inspected.");
+    } finally {
+      await runtime.abort();
+      await running;
+      await runtime.dispose();
+      subagentRuns.deferred = false;
+    }
+  });
 
   it("converges through TaskWait with reports and statuses", async () => {
     const runtime = createRuntime({ subagents: [explorer] });

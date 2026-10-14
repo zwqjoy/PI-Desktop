@@ -110,7 +110,9 @@ import {
   formatSessionMessage,
   hostedSearchFromMessage,
   isCommandShellOption,
+  isAskToolQuestionWithinLimit,
   isToolsOutputParams,
+  MAX_ASK_TOOL_QUESTION_CHARS,
   MAX_SUBAGENT_CONCURRENCY,
   normalizeAskToolOption,
   normalizeSubagentName,
@@ -1930,6 +1932,8 @@ export class DesktopAgentRuntime {
   private turnEpoch = 0;
   private compactionAbort?: AbortController;
   private compactionInProgress = false;
+  /** Runtime operations that own a durable turn until their async cleanup ends. */
+  private readonly activeTurnSettlements = new Map<string, Promise<void>>();
   /** The in-flight checkpoint was cut short by Stop/dispose, not by a failure. */
   private compactionAborted = false;
   /** Set by the `new_context` tool, consumed at the next turn boundary. */
@@ -2096,6 +2100,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
                       : undefined;
                   },
                 ),
+                this.provider.authKind,
               ),
               onResponse: async (response, responseModel) => {
                 this.providerResponseStatus = response.status;
@@ -3193,7 +3198,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         case "TodoWrite":
           return todoWriteDescription;
         case ASK_TOOL_NAME:
-          return "Ask the user one or more questions. Use Markdown in question text and option labels when formatting helps (for example, emphasis, inline code, or lists); the desktop card renders it safely. Plain strings and existing `{ label, description? }` options are accepted; descriptions remain plain text and answers return the selected source label. The card always provides a custom user-input option.";
+          return `Ask the user one or more questions. Keep each question to ${MAX_ASK_TOOL_QUESTION_CHARS} characters or fewer. Use Markdown in question text and option labels when formatting helps (for example, emphasis, inline code, or lists); the desktop card renders it safely. Plain strings and existing { label, description? } options are accepted; descriptions remain plain text and answers return the selected source label. The card always provides a custom user-input option.`;
         case "PluginScaffold":
           return "Create a PI-Desktop plugin from a template and load it for development. `directory` is workspace-relative and must be empty or new; `template` is one of panel-basic, agent-tool-basic, skill-pack, full-demo. Use this instead of hand-writing plugin files.";
         case "PluginCheck":
@@ -3701,7 +3706,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       parameters: Type.Object({
         questions: Type.Array(
           Type.Object({
-            question: Type.String(),
+            question: Type.String({ maxLength: MAX_ASK_TOOL_QUESTION_CHARS }),
             options: Type.Array(
               Type.Union([
                 Type.String(),
@@ -3723,7 +3728,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
             content: [
               {
                 type: "text",
-                text: `${ASK_TOOL_NAME} requires one or more questions, each with a question and at least one option.`,
+                text: `${ASK_TOOL_NAME} requires 1–20 questions. Each question must contain 1–${MAX_ASK_TOOL_QUESTION_CHARS} characters and at least one option.`,
               },
             ],
             details: { errorCode: "ASKTOOL_INVALID_ARGUMENT" },
@@ -5286,7 +5291,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
       name: SUBAGENT_WAIT_TOOL_NAME,
       label: "Task Wait",
       description:
-        "Wait for one or more subagents started by Task and return their reports. `delegationIds` defaults to every running subagent; use mode \"any\" with `minCompleted` to converge as soon as the first (or first N) finish. Settled delegations return immediately, so re-reading a report by id is cheap. A wait timeout is not a failure: unfinished delegates keep working and the runtime delivers their reports when they finish.",
+        "Wait for one or more subagents started by Task and return their reports. `delegationIds` defaults to every running subagent; use mode \"any\" with `minCompleted` to converge as soon as the first (or first N) finish. Settled delegations return immediately, so re-reading a report by id is cheap. New user input interrupts the wait without canceling delegates; handle it before waiting again. A wait timeout is not a failure: unfinished delegates keep working and the runtime delivers their reports when they finish.",
       parameters: Type.Object({
         delegationIds: Type.Optional(
           Type.Array(
@@ -5353,17 +5358,24 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
             : Math.min(Math.max(minCompleted, 1), targets.length);
         const deadline = Date.now() + timeoutSeconds * 1000;
         this.beginDelegationWait(targets);
+        const waitAbort = new AbortController();
+        this.steeringWaitAbort = waitAbort;
         let timedOut = false;
         try {
-          timedOut = await this.waitForDelegations(
-            targets,
-            targetCompleted,
-            deadline,
-            signal,
-          );
+          if (!this.pendingSteering.size) {
+            timedOut = await this.waitForDelegations(
+              targets,
+              targetCompleted,
+              deadline,
+              signal ? AbortSignal.any([signal, waitAbort.signal]) : waitAbort.signal,
+            );
+          }
         } finally {
+          if (this.steeringWaitAbort === waitAbort) this.steeringWaitAbort = undefined;
           this.endDelegationWait();
         }
+        const interrupted = this.pendingSteering.size > 0 && !signal?.aborted &&
+          !this.runCancelled && !this.disposed && !this.turnHadError;
         // A settled report included in this bounded result reached the parent;
         // the idle resume must not deliver it a second time. Omitted reports
         // stay pending so the idle resume can deliver them later. Running
@@ -5386,14 +5398,16 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
               ? formatDelegationHeartbeat(record)
               : (record.result?.report ?? `(${record.status} without a report)`),
         }));
-        const note = timedOut
-          ? `Still running after ${timeoutSeconds}s: ${results.filter((r) => r.status !== "running").length}/${targets.length} finished. This is not a failure — unfinished delegates keep working and the runtime will deliver their reports when they finish. Call TaskStop only to cancel.\n${targets
-              .filter((record) => record.status === "running")
-              .map(formatDelegationHeartbeat)
-              .join("\n")}`
-          : mode === "any"
-            ? `Converged after ${results.filter((r) => r.status !== "running").length} of ${targets.length} finished.`
-            : undefined;
+        const note = interrupted
+          ? "Interrupted by new user input. Unfinished subagents keep working; handle the user's message before waiting again."
+          : timedOut
+            ? `Still running after ${timeoutSeconds}s: ${results.filter((r) => r.status !== "running").length}/${targets.length} finished. This is not a failure — unfinished delegates keep working and the runtime will deliver their reports when they finish. Call TaskStop only to cancel.\n${targets
+                .filter((record) => record.status === "running")
+                .map(formatDelegationHeartbeat)
+                .join("\n")}`
+            : mode === "any"
+              ? `Converged after ${results.filter((r) => r.status !== "running").length} of ${targets.length} finished.`
+              : undefined;
         const unknownNote =
           unknownIds.length > 0
             ? `Unknown delegation ids (not found in this session): ${unknownIds.join(", ")}.`
@@ -5418,7 +5432,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
             },
           ],
           details: {
-            status: timedOut ? "timeout" : "completed",
+            status: interrupted ? "interrupted" : timedOut ? "timeout" : "completed",
             ...(unknownIds.length ? { unknownIds } : {}),
             delegations: results,
           },
@@ -5441,6 +5455,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     const settledCount = () =>
       targets.filter((record) => record.status !== "running").length;
     if (settledCount() >= targetCompleted) return Promise.resolve(false);
+    if (signal?.aborted) return Promise.resolve(true);
     return new Promise<boolean>((resolve) => {
       let done = false;
       const finish = (timedOut: boolean) => {
@@ -5819,6 +5834,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     for (const raw of params.questions) {
       if (!isRecord(raw)) return undefined;
       const question = typeof raw.question === "string" ? raw.question.trim() : "";
+      if (!question || !isAskToolQuestionWithinLimit(question)) return undefined;
       const options: AskToolQuestion["options"] = [];
       const seenLabels = new Set<string>();
       if (Array.isArray(raw.options)) {
@@ -5831,7 +5847,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
           options.push(option);
         }
       }
-      if (!question || options.length === 0) return undefined;
+      if (options.length === 0) return undefined;
       questions.push({
         question,
         options,
@@ -7793,6 +7809,15 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
             this.progressTurnRerunInProgress
               ? this.currentAssistant
               : undefined;
+          const requestWaitMs =
+            this.requestStartedAt !== undefined
+              ? Math.max(0, Date.now() - this.requestStartedAt)
+              : undefined;
+          const cumulativeProviderWaitMs =
+            requestWaitMs !== undefined ||
+            retryingAssistant?.providerWaitMs !== undefined
+              ? (retryingAssistant?.providerWaitMs ?? 0) + (requestWaitMs ?? 0)
+              : undefined;
           const initialText =
             content.hasText && content.text.length > 0
               ? content.text
@@ -7810,6 +7835,12 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
             status: "streaming",
             modelId: this.provider.modelId,
             providerId: this.provider.id,
+            ...(retryingAssistant?.modelStreamDurationMs !== undefined
+              ? { modelStreamDurationMs: retryingAssistant.modelStreamDurationMs }
+              : {}),
+            ...(cumulativeProviderWaitMs !== undefined
+              ? { providerWaitMs: cumulativeProviderWaitMs }
+              : {}),
           };
           if (retryingAssistant) {
             // Keep one visible assistant bubble across the bounded retry. The
@@ -7983,6 +8014,9 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
             this.streamStartedAt !== undefined
               ? Math.max(0, endedAt - this.streamStartedAt)
               : undefined;
+          const modelStreamDurationMs =
+            (this.currentAssistant.modelStreamDurationMs ?? 0) +
+            (streamMs ?? 0);
           if (classifiedError) {
             classifiedError = this.providerErrorWithDiagnostics(
               classifiedError,
@@ -8030,6 +8064,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
               status: "streaming",
               modelId: this.provider.modelId,
               providerId: this.provider.id,
+              ...(streamMs !== undefined ? { modelStreamDurationMs } : {}),
               ...(usage ? { usage } : {}),
             };
             this.emit({ type: "message_update", message: this.currentAssistant });
@@ -8077,6 +8112,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
               status: "streaming",
               modelId: this.provider.modelId,
               providerId: this.provider.id,
+              ...(streamMs !== undefined ? { modelStreamDurationMs } : {}),
               ...(usage ? { usage } : {}),
             };
             this.emit({ type: "message_update", message: this.currentAssistant });
@@ -8102,6 +8138,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
               status: "streaming",
               modelId: this.provider.modelId,
               providerId: this.provider.id,
+              ...(streamMs !== undefined ? { modelStreamDurationMs } : {}),
               ...(usage ? { usage } : {}),
             };
             this.emit({ type: "message_update", message: this.currentAssistant });
@@ -8135,6 +8172,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
               status: "streaming",
               modelId: this.provider.modelId,
               providerId: this.provider.id,
+              ...(streamMs !== undefined ? { modelStreamDurationMs } : {}),
               ...(usage ? { usage } : {}),
             };
             this.emit({ type: "message_update", message: this.currentAssistant });
@@ -8176,6 +8214,7 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
             providerId: this.provider.id,
             ...(usage ? { usage } : {}),
             ...(responseDurationMs !== undefined ? { responseDurationMs } : {}),
+            ...(streamMs !== undefined ? { modelStreamDurationMs } : {}),
             ...(responseOutputTokens !== undefined
               ? { responseOutputTokens }
               : {}),
@@ -8392,6 +8431,9 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         this.streamStartedAt !== undefined
           ? Math.max(0, Date.now() - this.streamStartedAt)
           : undefined;
+      const modelStreamDurationMs =
+        (this.currentAssistant.modelStreamDurationMs ?? 0) +
+        (responseDurationMs ?? 0);
       const responseOutputTokens =
         status === "aborted"
           ? estimateVisibleResponseOutputTokens(this.currentAssistant)
@@ -8400,6 +8442,9 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         ...this.currentAssistant,
         status,
         ...(responseDurationMs !== undefined ? { responseDurationMs } : {}),
+        ...(responseDurationMs !== undefined
+          ? { modelStreamDurationMs }
+          : {}),
         ...(responseOutputTokens !== undefined
           ? { responseOutputTokens }
           : {}),
@@ -8461,7 +8506,15 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
         errorCode: "TURN_NOT_FOUND",
       });
     }
+    return this.trackTurnOperation(durableTurnId, () =>
+      this.executeApprovedPlanTurn(execution, durableTurnId),
+    );
+  }
 
+  private async executeApprovedPlanTurn(
+    execution: PlanExecution,
+    durableTurnId: string,
+  ): Promise<{ turnId: string }> {
     // Keep every new user turn small. A capability loaded for the preceding
     // turn can be searched again when the new task actually needs it.
     this.subagentOverrideProviders = {};
@@ -8572,12 +8625,23 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
   ): Promise<{ turnId: string }> {
     if (this.disposed) throw new Error("runtime disposed");
     this.assertNotRunning();
+    const turnId = durableTurnId?.trim() || randomUUID();
+    return this.trackTurnOperation(turnId, () =>
+      this.promptTurn(input, userMessageId, turnId),
+    );
+  }
+
+  private async promptTurn(
+    input: string | RuntimePrompt,
+    userMessageId: string | undefined,
+    durableTurnId: string,
+  ): Promise<{ turnId: string }> {
     const selectedTools = this.selectedMcpTools(input);
     const modelInput = typeof input !== "string" && input.sessionMessage
       ? { ...input, text: formatSessionMessage(input.text, input.sessionMessage), sessionMessage: undefined }
       : input;
     this.retainPendingSteering();
-    const nextTurnId = durableTurnId?.trim() || randomUUID();
+    const nextTurnId = durableTurnId;
     this.turnId = nextTurnId;
     this.acceptingSteering = true;
     this.gracefulStopRequested = false;
@@ -8844,6 +8908,10 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
   }
 
   async abort(): Promise<void> {
+    const turnId = this.turnId;
+    const settlement = turnId
+      ? this.activeTurnSettlements.get(turnId)
+      : undefined;
     this.acceptingSteering = false;
     this.gracefulStopRequested = false;
     this.runCancelled = true;
@@ -8856,6 +8924,34 @@ Do not invent objections or turn speculative risks into blockers. Stop when the 
     this.providerRetryAbort?.abort();
     if (this.compactionInProgress) this.compactionAborted = true;
     this.compactionAbort?.abort();
+    await settlement;
+  }
+
+  private trackTurnOperation<T>(
+    turnId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    let settle!: () => void;
+    const settlement = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    this.activeTurnSettlements.set(turnId, settlement);
+    let result: Promise<T>;
+    try {
+      result = operation();
+    } catch (error) {
+      if (this.activeTurnSettlements.get(turnId) === settlement) {
+        this.activeTurnSettlements.delete(turnId);
+      }
+      settle();
+      throw error;
+    }
+    return result.finally(() => {
+      if (this.activeTurnSettlements.get(turnId) === settlement) {
+        this.activeTurnSettlements.delete(turnId);
+      }
+      settle();
+    });
   }
 
   /** Ask pi-agent-core to stop after the current assistant/tool turn. */
